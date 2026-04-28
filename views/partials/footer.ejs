@@ -1,0 +1,8 @@
+<a href="/dashboard"><img src="/base/img/logo_small_beeldmerk_blauw.png" alt="Huttendorp"></a>
+<p>&copy; JaBuvo</p>
+<a href="/dashboard">Dashboard</a>
+<% if (isAdminLoggedIn) { %>
+  <form action="/logout" method="post" class="footerForm"><button class="footerLink" type="submit">Uitloggen</button></form>
+<% } else { %>
+  <a href="/login">Login</a>
+<% } %>

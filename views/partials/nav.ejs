@@ -1,0 +1,8 @@
+<h1><a href="/dashboard"><img src="/base/img/logo_full.png" alt="Huttendorp"></a></h1>
+<a href="/dashboard" class="noPhone">Dashboard</a>
+<% if (isAdminLoggedIn) { %>
+  <a href="/leaderboard" class="noPhone">Leaderboard</a>
+  <a href="/beheer" class="noPhone">Beheer</a>
+  <a href="/setup" class="noPhone">Game setup</a>
+  <a href="/gamemaster" class="noPhone">Gamemaster</a>
+<% } %>

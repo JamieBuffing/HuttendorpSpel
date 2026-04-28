@@ -1,0 +1,189 @@
+<%- include('../partials/page-shell-start', { title: 'Beheer' }); %>
+<%
+  const q = editingQuestion || {};
+  const isEdit = Boolean(editingQuestion);
+  const type = q.type || 'normal';
+  const answer = (key) => (q.answers || []).find((item) => item.key === key) || {};
+  const hint = (key) => answer(key).hint || {};
+  const correct = (q.answers || []).find((item) => item.isCorrect)?.key || 'R';
+%>
+<section class="panel">
+  <div class="sectionHeader">
+    <div>
+      <h1><%= isEdit ? 'Vraag bewerken' : 'Vraag aanmaken' %></h1>
+      <p>Normale vragen krijgen automatisch de eerste vrije post-id. Eindvragen hebben geen post-id.</p>
+    </div>
+    <% if (isEdit) { %><a class="buttonGhost" href="/beheer">Nieuwe vraag</a><% } %>
+  </div>
+
+  <% if (error) { %><p class="error"><%= error %></p><% } %>
+
+  <form method="post" action="<%= isEdit ? '/questions/' + q._id : '/questions' %>" class="formStack" id="questionForm">
+    <div class="gridForm compactType">
+      <label>Vraagtekst
+        <textarea name="title" rows="4" required><%= q.title || '' %></textarea>
+      </label>
+      <label>Type vraag
+        <select name="type" id="questionType">
+          <option value="normal" <%= type === 'normal' ? 'selected' : '' %>>Normale vraag</option>
+          <option value="final" <%= type === 'final' ? 'selected' : '' %>>Eindvraag</option>
+        </select>
+      </label>
+      <label>Punten
+        <input type="number" name="points" min="0" value="<%= q.points || 0 %>" required>
+      </label>
+    </div>
+
+    <div class="infoBox normalOnly">
+      <strong>Post-id:</strong>
+      <% if (isEdit && q.type === 'normal') { %>
+        <code><%= q.postId %></code>
+      <% } else { %>
+        <code><%= availablePostId || 'geen vrije id' %></code>
+      <% } %>
+      <span>Deze wordt automatisch gekoppeld aan de normale vraag.</span>
+    </div>
+
+    <div class="normalOnly answerGrid">
+      <% ['R','G','B'].forEach((key) => { const currentHint = hint(key); %>
+        <article class="answerCard" data-answer-card="<%= key %>">
+          <h3>Antwoord <%= key %></h3>
+          <label>Antwoordtekst<input name="answer<%= key %>Label" value="<%= answer(key).label || '' %>"></label>
+          <label class="radioLine"><input type="radio" name="normalCorrectAnswer" value="<%= key %>" <%= correct === key ? 'checked' : '' %>> Dit is goed</label>
+          <label>Hint type
+            <select name="answer<%= key %>HintType" class="hintType" data-key="<%= key %>">
+              <option value="none" <%= !currentHint.type ? 'selected' : '' %>>Geen</option>
+              <option value="text" <%= currentHint.type === 'text' ? 'selected' : '' %>>Tekst</option>
+              <option value="image" <%= currentHint.type === 'image' ? 'selected' : '' %>>Afbeelding upload</option>
+              <option value="video" <%= currentHint.type === 'video' ? 'selected' : '' %>>Video upload / link</option>
+            </select>
+          </label>
+
+          <div class="hintTextFields">
+            <label>Hint tekst / Blob URL
+              <textarea name="answer<%= key %>HintValue" class="hintValue" rows="3" placeholder="Wordt automatisch gevuld na upload"><%= currentHint.value || '' %></textarea>
+            </label>
+          </div>
+
+          <div class="uploadBox hintUploadFields">
+            <strong>Bestand uploaden naar Vercel Blob</strong>
+            <input type="file" class="blobUpload" data-target="answer<%= key %>HintValue" accept="image/*,video/*">
+            <span class="uploadStatus">Kies een afbeelding of video. Na upload komt de Blob URL automatisch hierboven te staan.</span>
+          </div>
+
+          <% if (currentHint.value) { %>
+            <div class="hintPreview">
+              <% if (currentHint.type === 'image') { %>
+                <img src="<%= currentHint.value %>" alt="Hint preview">
+              <% } else if (currentHint.type === 'video') { %>
+                <video src="<%= currentHint.value %>" controls></video>
+              <% } %>
+            </div>
+          <% } %>
+        </article>
+      <% }) %>
+    </div>
+
+    <div class="finalOnly finalFields">
+      <label>Correct antwoord
+        <input name="finalCorrectAnswer" value="<%= q.correctAnswer || '' %>" placeholder="Antwoord dat de spelleiding moet zien">
+      </label>
+      <label class="radioLine">
+        <input type="checkbox" name="requiredForLeaderboard" <%= q.requiredForLeaderboard ? 'checked' : '' %>> Verplicht voor leaderboard ranking
+      </label>
+      <p class="helpText">Alleen verplichte eindvragen bepalen of een team grijs wordt en onderaan komt. Niet-verplichte eindvragen tellen wel mee voor punten.</p>
+    </div>
+
+    <button class="button" type="submit"><%= isEdit ? 'Wijzigingen opslaan' : 'Vraag opslaan' %></button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Overzicht vragen en post-id’s</h2>
+  <table class="dataTable">
+    <thead><tr><th>Type</th><th>Post-id</th><th>Vraag</th><th>Punten</th><th>Verplicht</th><th>Acties</th></tr></thead>
+    <tbody>
+      <% questions.forEach((question) => { %>
+        <tr>
+          <td><%= question.type === 'final' ? 'Eindvraag' : 'Normaal' %></td>
+          <td><%= question.type === 'normal' ? question.postId : '-' %></td>
+          <td><%= question.title %></td>
+          <td><%= question.points || 0 %></td>
+          <td><%= question.type === 'final' ? (question.requiredForLeaderboard ? 'Ja' : 'Nee') : '-' %></td>
+          <td class="actions">
+            <a class="buttonGhost small" href="/beheer/<%= question._id %>/edit">Bewerken</a>
+            <form method="post" action="/questions/<%= question._id %>/delete" onsubmit="return confirm('Vraag verwijderen?')"><button class="danger" type="submit">Verwijderen</button></form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<script type="module" src="/vercelblob/static/js/uploader.js"></script>
+<script>
+  const typeSelect = document.getElementById('questionType');
+
+  function updateQuestionTypeFields() {
+    const isFinal = typeSelect.value === 'final';
+    document.querySelectorAll('.normalOnly').forEach((el) => el.style.display = isFinal ? 'none' : '');
+    document.querySelectorAll('.finalOnly').forEach((el) => el.style.display = isFinal ? '' : 'none');
+  }
+
+  function updateHintFields(card) {
+    const hintType = card.querySelector('.hintType')?.value || 'none';
+    const valueField = card.querySelector('.hintTextFields');
+    const uploadField = card.querySelector('.hintUploadFields');
+
+    if (valueField) valueField.style.display = hintType === 'none' ? 'none' : '';
+    if (uploadField) uploadField.style.display = ['image', 'video'].includes(hintType) ? '' : 'none';
+  }
+
+  typeSelect.addEventListener('change', updateQuestionTypeFields);
+  document.querySelectorAll('[data-answer-card]').forEach((card) => {
+    card.querySelector('.hintType')?.addEventListener('change', () => updateHintFields(card));
+    updateHintFields(card);
+  });
+
+  document.querySelectorAll('.blobUpload').forEach((input) => {
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      const card = input.closest('[data-answer-card]');
+      const status = card.querySelector('.uploadStatus');
+      const target = document.querySelector(`[name="${input.dataset.target}"]`);
+      const hintType = card.querySelector('.hintType');
+
+      status.className = 'uploadStatus';
+      status.textContent = 'Uploaden naar Vercel Blob...';
+
+      try {
+        const uploader = window.JaBuvoBlobUploader;
+        if (!uploader) throw new Error('Vercel Blob uploader is nog niet geladen. Probeer het opnieuw.');
+
+        const result = await uploader.uploadWithVercelBlob(file, {
+          module: 'huttendorp',
+          entityType: 'hints',
+          entityId: '<%= isEdit && q._id ? q._id : 'nieuwe-vraag' %>',
+          field: input.dataset.target,
+          visibility: 'public',
+          allowedContentTypes: file.type ? [file.type] : []
+        });
+
+        target.value = result.url;
+        if (file.type.startsWith('image/')) hintType.value = 'image';
+        if (file.type.startsWith('video/')) hintType.value = 'video';
+        updateHintFields(card);
+
+        status.className = 'uploadStatus ok';
+        status.textContent = 'Upload klaar. De Blob URL is automatisch ingevuld.';
+      } catch (error) {
+        status.className = 'uploadStatus error';
+        status.textContent = error.message || 'Upload mislukt.';
+      }
+    });
+  });
+
+  updateQuestionTypeFields();
+</script>
+<%- include('../partials/page-shell-end'); %>

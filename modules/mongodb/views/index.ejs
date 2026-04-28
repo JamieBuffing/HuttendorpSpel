@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <%- include('../../../views/partials/head'); %>
+  <title>MongoDB</title>
+</head>
+<body>
+  <header>
+    <nav>
+      <%- include('../../../views/partials/nav'); %>
+    </nav>
+  </header>
+
+  <main>
+    <h1>MongoDB module</h1>
+    <p>Status: <strong><%= mongoStatus %></strong></p>
+    <p><%= mongoMessage %></p>
+    <p><a href="/">Terug naar home</a></p>
+  </main>
+
+  <aside id="aside">
+    <%- include('../../../views/partials/aside'); %>
+  </aside>
+
+  <footer>
+    <%- include('../../../views/partials/footer'); %>
+    <%- include('../../../views/partials/script'); %>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,11 @@
+:root {
+  --JaBuvo1: #0B1F3A; /* Hoofdkleur / achtergrond (donkerblauw, basis van je merk) */
+  --JaBuvo2: #2F80ED; /* Primaire actie (knoppen, links, belangrijkste CTA’s) */
+  --JaBuvo3: #2D9CDB; /* Hover / actieve staat van primaire acties */
+  --JaBuvo4: #F2994A; /* Accentkleur (waarschuwingen, belangrijke acties, aandacht trekken) */
+  --JaBuvo5: #6C5CE7; /* Secundaire accentkleur (branding, highlights, speciale features) */
+  --wit: #ffffff; /* Tekst op donkere achtergronden / algemene achtergrond */
+  --zwart: #111111; /* Tekst op lichte achtergronden */
+  --tussenfase: #ebebeb;
+  --tekstZacht: #475569;
+}

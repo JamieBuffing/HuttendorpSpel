@@ -1,0 +1,21 @@
+<%- include('../partials/page-shell-start', { title: 'Game setup' }); %>
+<section class="panel">
+  <h1>Game setup</h1>
+  <form method="post" action="/teams" class="gridForm two">
+    <label>Kaart ID<input name="cardId" placeholder="Scan kaart..." required></label>
+    <label>Teamnaam<input name="name" placeholder="Team Rood" required></label>
+    <button class="button" type="submit">Team opslaan</button>
+  </form>
+</section>
+<section class="panel">
+  <h2>Teams</h2>
+  <table class="dataTable">
+    <thead><tr><th>Naam</th><th>Kaart</th><th>Punten</th><th></th></tr></thead>
+    <tbody>
+      <% teams.forEach((team) => { %>
+        <tr><td><%= team.name %></td><td><code><%= team.cardId %></code></td><td><%= team.totalPoints || 0 %></td><td><form method="post" action="/teams/<%= team._id %>/delete" onsubmit="return confirm('Team verwijderen?')"><button class="danger" type="submit">Verwijderen</button></form></td></tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<%- include('../partials/page-shell-end'); %>

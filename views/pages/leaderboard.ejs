@@ -1,0 +1,71 @@
+<%- include('../partials/page-shell-start', { title: 'Leaderboard' }); %>
+
+<section class="panel">
+  <h1>Leaderboard</h1>
+  <p>Teams met alle verplichte eindvragen goed staan altijd bovenaan. Teams die een verplichte eindvraag missen of fout hebben worden grijs getoond.</p>
+
+  <% 
+    const scoredTeams = teams.filter(team => Number(team.totalPoints || 0) > 0);
+    const latestScoreAt = scoredTeams
+      .map(team => team.updatedAt || team.createdAt)
+      .filter(Boolean)
+      .sort((a, b) => new Date(b) - new Date(a))[0];
+
+    const shouldShowCountdown = latestScoreAt && (Date.now() - new Date(latestScoreAt).getTime()) <= 10 * 60 * 1000;
+  %>
+
+  <% if (shouldShowCountdown) { %>
+    <p class="leaderboardCountdown">
+      Volgende update over <strong id="refreshCountdown">50</strong> seconden
+    </p>
+  <% } %>
+
+  <table class="dataTable">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Team</th>
+        <th>Punten</th>
+        <th>Verplichte eindvragen</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% teams.forEach((team, index) => { %>
+        <tr class="<%= team.finalQuestionsCorrect ? '' : 'mutedRow' %>">
+          <td><%= index + 1 %></td>
+          <td><%= team.name %></td>
+          <td><strong><%= team.totalPoints || 0 %></strong></td>
+          <td>
+            <% if (!team.hasRequiredFinalQuestions) { %>
+              Geen verplichte eindvragen
+            <% } else { %>
+              <%= team.finalQuestionsCorrect ? 'Goed' : 'Niet goed / nog niet compleet' %>
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+
+<% if (shouldShowCountdown) { %>
+  <script>
+    let countdown = 50;
+    const countdownElement = document.getElementById('refreshCountdown');
+
+    const interval = setInterval(() => {
+      countdown -= 1;
+
+      if (countdownElement) {
+        countdownElement.textContent = countdown;
+      }
+
+      if (countdown <= 0) {
+        clearInterval(interval);
+        window.location.reload();
+      }
+    }, 1000);
+  </script>
+<% } %>
+
+<%- include('../partials/page-shell-end'); %>

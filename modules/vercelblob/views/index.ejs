@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <%- include('../../../views/partials/head'); %>
+  <link rel="stylesheet" href="/vercelblob/static/css/index.css"/>
+  <title>Vercel Blob | JaBuvo</title>
+</head>
+<body>
+  <header>
+    <nav>
+      <%- include('../../../views/partials/nav'); %>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Vercel Blob service module</h1>
+
+    <p>Status: <strong><%= blobStatus %></strong></p>
+    <p><%= blobMessage %></p>
+
+    <% if (blobDetails) { %>
+      <pre><%= JSON.stringify(blobDetails, null, 2) %></pre>
+    <% } %>
+
+    <section>
+      <h2>Gebruik</h2>
+      <p>
+        Deze module is bedoeld als centrale upload service voor andere modules.
+      </p>
+      <p>
+        Gebruik in je eigen modulepagina:
+        <code>/vercelblob/static/js/uploader.js</code>
+      </p>
+      <p>
+        Upload endpoint:
+        <code>/vercelblob/client-upload</code>
+      </p>
+    </section>
+  </main>
+
+  <aside id="aside">
+    <%- include('../../../views/partials/aside'); %>
+  </aside>
+
+  <footer>
+    <%- include('../../../views/partials/footer'); %>
+    <%- include('../../../views/partials/script'); %>
+  </footer>
+</body>
+</html>

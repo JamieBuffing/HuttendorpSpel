@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head><%- include('../partials/head'); %><title>Game setup | Huttendorp NFC spel</title></head>
+<body>
+<header><nav><%- include('../partials/nav'); %></nav></header>
+<main>
+  <section class="pageHero"><p class="eyebrow">Game setup</p><h1>Teams instellen</h1><p>Scan een NFC-kaart en koppel deze aan een teamnaam.</p></section>
+  <section class="cardGrid twoCols">
+    <article class="panel"><h2>Nieuw team</h2><form class="stackForm"><label>Kaart ID<input placeholder="Scan kaart..." /></label><label>Teamnaam<input placeholder="Team Rood" /></label><button class="button" type="button">Team aanmaken</button></form></article>
+    <article class="panel"><h2>Teams</h2><div class="tableWrap"><table><thead><tr><th>Team</th><th>Kaart</th><th>Punten</th></tr></thead><tbody><tr><td>Nog geen team</td><td>-</td><td>0</td></tr></tbody></table></div></article>
+  </section>
+</main>
+<footer><%- include('../partials/footer'); %></footer><%- include('../partials/script'); %>
+</body></html>

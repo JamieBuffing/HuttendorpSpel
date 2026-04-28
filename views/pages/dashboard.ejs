@@ -1,0 +1,56 @@
+<%- include('../partials/page-shell-start', { title: 'Dashboard' }); %>
+<section class="panel">
+  <h1>Team dashboard</h1>
+  <p>Scan een teamkaart om de antwoorden op tijdsvolgorde te bekijken.</p>
+  <form method="get" action="/dashboard" class="gridForm two">
+    <label>Kaart ID<input name="cardId" value="<%= cardId || '' %>" placeholder="Scan kaart..." autofocus></label>
+    <button class="button" type="submit">Open dashboard</button>
+  </form>
+</section>
+
+<% if (cardId && !team) { %>
+  <section class="panel"><p class="error">Geen team gevonden voor kaart <code><%= cardId %></code>.</p></section>
+<% } %>
+
+<% if (team) { %>
+<section class="panel">
+  <div class="sectionHeader dashboardHeader">
+    <div>
+      <h2><%= team.name %></h2>
+      <p>Totaal: <strong><%= team.totalPoints || 0 %> punten</strong></p>
+    </div>
+    <a class="button dangerButton" href="/dashboard">Sluit dashboard</a>
+  </div>
+  <table class="dataTable">
+    <thead><tr><th>Tijd</th><th>Vraag</th><th>Antwoord</th><th>Punten</th><th>Hint</th></tr></thead>
+    <tbody>
+      <% progressRows.forEach(({ progress, question }) => { %>
+        <tr>
+          <td><%= progress.answeredAt ? new Date(progress.answeredAt).toLocaleString('nl-NL') : '-' %></td>
+          <td><%= question?.title || 'Vraag verwijderd' %></td>
+          <td><%= progress.type === 'final' ? (progress.isCorrect ? 'Goed' : 'Fout') : progress.selectedAnswer %></td>
+          <td><%= progress.pointsEarned || 0 %></td>
+          <td>
+            <% if (progress.type === 'normal' && question) { const selected = (question.answers || []).find((a) => a.key === progress.selectedAnswer); const hint = selected && selected.hint; %>
+              <% if (hint && (progress.hintViews || 0) < 3) { %>
+                <details><summary>Bekijk hint (<%= progress.hintViews || 0 %>/3)</summary>
+                  <% if (hint.type === 'text') { %><p><%= hint.value %></p><% } %>
+                  <% if (hint.type === 'image') { %><img class="hintImage" src="<%= hint.value %>" alt="Hint"><% } %>
+                  <% if (hint.type === 'video') { %><video class="hintVideo" src="<%= hint.value %>" controls></video><% } %>
+                </details>
+              <% } else if (hint) { %>
+                Limiet bereikt
+              <% } else { %>
+                Geen hint
+              <% } %>
+            <% } else { %>
+              -
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<% } %>
+<%- include('../partials/page-shell-end'); %>

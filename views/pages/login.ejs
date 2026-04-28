@@ -1,0 +1,12 @@
+<%- include('../partials/page-shell-start', { title: 'Login' }); %>
+<section class="panel narrow">
+  <h1>Login spelleiding</h1>
+  <p>Dashboard is publiek. De andere schermen zijn afgeschermd.</p>
+  <% if (error) { %><p class="error"><%= error %></p><% } %>
+  <form method="post" action="/login" class="formStack">
+    <input type="hidden" name="next" value="<%= next %>">
+    <label>Wachtwoord<input type="password" name="password" autofocus required></label>
+    <button class="button" type="submit">Inloggen</button>
+  </form>
+</section>
+<%- include('../partials/page-shell-end'); %>

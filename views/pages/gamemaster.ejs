@@ -1,0 +1,49 @@
+<%- include('../partials/page-shell-start', { title: 'Gamemaster' }); %>
+<section class="panel">
+  <h1>Gamemaster</h1>
+  <p>Scan een teamkaart. Daarna staan alle eindvragen klaar. De spelleiding ziet het correcte antwoord en kiest per vraag goed of fout.</p>
+  <form method="get" action="/gamemaster" class="gridForm two">
+    <label>Kaart ID<input name="cardId" value="<%= cardId || '' %>" placeholder="Scan kaart..." autofocus></label>
+    <button class="button" type="submit">Team openen</button>
+  </form>
+</section>
+
+<% if (cardId && !team) { %>
+  <section class="panel"><p class="error">Geen team gevonden voor kaart <code><%= cardId %></code>.</p></section>
+<% } %>
+
+<% if (team) { %>
+<section class="panel">
+  <h2><%= team.name %></h2>
+  <% if (!rows.length) { %><p>Er zijn nog geen eindvragen aangemaakt.</p><% } %>
+  <div class="cardsGrid">
+    <% rows.forEach(({ question, progress }) => { %>
+      <article class="serviceCard">
+        <p class="eyebrow"><%= question.requiredForLeaderboard ? 'Verplicht' : 'Niet verplicht' %> • <%= question.points || 0 %> punten</p>
+        <h3><%= question.title %></h3>
+        <p><strong>Correct antwoord:</strong> <%= question.correctAnswer %></p>
+        <% if (progress) { %>
+          <p>Status: <strong><%= progress.isCorrect ? 'Goed' : 'Fout' %></strong> — <%= progress.pointsEarned || 0 %> punten</p>
+        <% } %>
+        <div class="buttonRow">
+          <form method="post" action="/gamemaster/final">
+            <input type="hidden" name="cardId" value="<%= cardId %>">
+            <input type="hidden" name="teamId" value="<%= team._id %>">
+            <input type="hidden" name="questionId" value="<%= question._id %>">
+            <input type="hidden" name="status" value="correct">
+            <button class="button" type="submit">Goed</button>
+          </form>
+          <form method="post" action="/gamemaster/final">
+            <input type="hidden" name="cardId" value="<%= cardId %>">
+            <input type="hidden" name="teamId" value="<%= team._id %>">
+            <input type="hidden" name="questionId" value="<%= question._id %>">
+            <input type="hidden" name="status" value="wrong">
+            <button class="danger" type="submit">Fout</button>
+          </form>
+        </div>
+      </article>
+    <% }) %>
+  </div>
+</section>
+<% } %>
+<%- include('../partials/page-shell-end'); %>

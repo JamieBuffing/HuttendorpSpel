@@ -1,0 +1,27 @@
+body footer {
+  position: static;
+  border-top: solid;
+  border-color: var(--JaBuvo1);
+  width: 90%;
+  margin: 10px 5% 0 5%;
+  height: 50px;
+  align-content: center;
+}
+
+body footer a,
+body footer p {
+  float: right;
+  display: inline;
+  height: 40px;
+  margin: 5px;
+  align-content: center;
+}
+
+body footer :nth-child(1),
+body footer :nth-child(2) {
+  float: left;
+}
+
+body footer a img {
+  height: inherit;
+}
