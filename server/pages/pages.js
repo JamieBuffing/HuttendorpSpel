@@ -6,11 +6,28 @@ const {
   requireLogin,
   getFirstAvailablePostId,
   buildLeaderboard,
-  isCorrectFinal,
+  buildLeidingOverview,
+  saveAnswerFromEsp,
   objectIdOrNull
 } = require('../helpers')
 
 const router = express.Router()
+
+function parseBackupJson(raw) {
+  const value = String(raw || '').trim()
+  if (!value) return []
+
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : [parsed]
+  } catch (error) {
+    return value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+  }
+}
 
 router.get('/', (req, res) => res.redirect('/dashboard'))
 
@@ -65,6 +82,56 @@ router.get('/leaderboard', requireLogin, async (req, res, next) => {
     res.render('pages/leaderboard', { teams: await buildLeaderboard() })
   } catch (error) {
     next(error)
+  }
+})
+
+router.get('/leiding-overzicht', requireLogin, async (req, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store')
+    res.render('pages/leiding-overzicht', { overview: await buildLeidingOverview() })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/import', requireLogin, (req, res) => {
+  res.render('pages/import', {
+    rawJson: '',
+    parsedCount: 0,
+    results: [],
+    error: null
+  })
+})
+
+router.post('/import', requireLogin, async (req, res) => {
+  const rawJson = String(req.body.json || '')
+
+  try {
+    const objects = parseBackupJson(rawJson)
+    const results = []
+
+    for (const item of objects) {
+      results.push(await saveAnswerFromEsp({
+        postId: item.postId || item.id,
+        teamId: item.teamId || item.cardId,
+        cardId: item.cardId || item.teamId,
+        answer: item.answer
+      }))
+    }
+
+    res.render('pages/import', {
+      rawJson,
+      parsedCount: objects.length,
+      results,
+      error: null
+    })
+  } catch (error) {
+    res.status(400).render('pages/import', {
+      rawJson,
+      parsedCount: 0,
+      results: [],
+      error: 'Ongeldige JSON. Plak een JSON-array, één JSON-object, of meerdere JSON-objecten onder elkaar.'
+    })
   }
 })
 

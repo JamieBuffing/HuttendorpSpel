@@ -1,0 +1,88 @@
+<%- include('../partials/page-shell-start', { title: 'Import ESP32 data' }); %>
+
+<section class="panel">
+  <h1>Import ESP32 data</h1>
+  <p>Plak hier de JSON die je via de ESP32 backup-pagina hebt opgehaald. Dit mag een JSON-array zijn, één JSON-object, of meerdere JSON-objecten onder elkaar.</p>
+
+  <% if (error) { %>
+    <p class="error"><%= error %></p>
+  <% } %>
+
+  <form method="post" action="/import" class="formStack">
+    <label>ESP32 JSON
+      <textarea name="json" id="jsonInput" rows="14" placeholder='[{"postId":"p01","teamId":"04AABBCC","answer":"R"}]'><%= rawJson || '' %></textarea>
+    </label>
+
+    <p class="helpText">
+      Herkend: <strong id="objectCount"><%= parsedCount || 0 %></strong> object(en)
+    </p>
+
+    <button class="button" type="submit">Objecten opslaan</button>
+  </form>
+</section>
+
+<% if (results && results.length) { %>
+  <section class="panel">
+    <h2>Import resultaat</h2>
+
+    <table class="dataTable">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Post</th>
+          <th>Team</th>
+          <th>Antwoord</th>
+          <th>Punten</th>
+          <th>Melding</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% results.forEach((result) => { %>
+          <tr class="<%= result.ok ? '' : 'mutedRow' %>">
+            <td><%= result.ok ? 'Opgeslagen' : 'Niet opgeslagen' %></td>
+            <td><%= result.postId || '-' %></td>
+            <td><%= result.teamName || result.teamId || result.cardId || '-' %></td>
+            <td><%= result.answer || '-' %></td>
+            <td><%= result.ok ? result.pointsEarned : '-' %></td>
+            <td><%= result.ok ? result.questionTitle : result.error %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </section>
+<% } %>
+
+<script>
+  const jsonInput = document.getElementById('jsonInput');
+  const objectCount = document.getElementById('objectCount');
+
+  function countObjects(raw) {
+    const value = String(raw || '').trim();
+    if (!value) return 0;
+
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.length : 1;
+    } catch (error) {
+      try {
+        return value
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+          .length;
+      } catch (lineError) {
+        return 0;
+      }
+    }
+  }
+
+  function updateCount() {
+    objectCount.textContent = countObjects(jsonInput.value);
+  }
+
+  jsonInput.addEventListener('input', updateCount);
+  updateCount();
+</script>
+
+<%- include('../partials/page-shell-end'); %>

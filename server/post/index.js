@@ -1,11 +1,10 @@
 const express = require('express')
-const { ObjectId } = require('mongodb')
 const {
   db,
   requireLogin,
   getFirstAvailablePostId,
   recalculateTeamPoints,
-  isCorrectNormal,
+  saveAnswerFromEsp,
   objectIdOrNull
 } = require('../helpers')
 
@@ -144,49 +143,19 @@ router.post('/questions/:id/delete', requireLogin, async (req, res, next) => {
 
 router.post('/api/esp32/answer', async (req, res, next) => {
   try {
-    const database = await db()
-    const postId = String(req.body.postId || req.body.id || '').trim()
-    const cardId = String(req.body.cardId || req.body.teamId || '').trim()
-    const selectedAnswer = String(req.body.answer || '').trim().toUpperCase()
+    const result = await saveAnswerFromEsp({
+      postId: req.body.postId || req.body.id,
+      cardId: req.body.cardId || req.body.teamId,
+      teamId: req.body.teamId || req.body.cardId,
+      answer: req.body.answer
+    })
 
-    const [team, question] = await Promise.all([
-      database.collection('teams').findOne({ cardId, isActive: { $ne: false } }),
-      database.collection('questions').findOne({ postId, type: 'normal', isActive: { $ne: false } })
-    ])
-
-    if (!team) return res.status(404).json({ ok: false, error: 'Team niet gevonden' })
-    if (!question) return res.status(404).json({ ok: false, error: 'Vraag/post niet gevonden' })
-    if (!['R', 'G', 'B'].includes(selectedAnswer)) return res.status(400).json({ ok: false, error: 'Ongeldig antwoord' })
-
-    const isCorrect = isCorrectNormal(question, selectedAnswer)
-    const pointsEarned = isCorrect ? Number(question.points || 0) : 0
-    const progressItem = {
-      questionId: question._id,
-      type: 'normal',
-      postId,
-      selectedAnswer,
-      isCorrect,
-      pointsEarned,
-      hintViews: 0,
-      answeredAt: new Date()
+    if (!result.ok) {
+      const status = ['Team niet gevonden', 'Vraag/post niet gevonden'].includes(result.error) ? 404 : 400
+      return res.status(status).json(result)
     }
 
-    await database.collection('teams').updateOne(
-      { _id: team._id },
-      {
-        $pull: { questionProgress: { questionId: question._id } }
-      }
-    )
-    await database.collection('teams').updateOne(
-      { _id: team._id },
-      {
-        $push: { questionProgress: progressItem },
-        $set: { updatedAt: new Date() }
-      }
-    )
-    const totalPoints = await recalculateTeamPoints(team._id)
-
-    res.json({ ok: true, isCorrect, pointsEarned, totalPoints })
+    res.json(result)
   } catch (error) {
     next(error)
   }
@@ -195,21 +164,56 @@ router.post('/api/esp32/answer', async (req, res, next) => {
 router.post('/api/hints/view', async (req, res, next) => {
   try {
     const database = await db()
+
     const teamId = objectIdOrNull(req.body.teamId)
     const questionId = objectIdOrNull(req.body.questionId)
-    if (!teamId || !questionId) return res.status(400).json({ ok: false })
+
+    if (!teamId || !questionId) {
+      return res.status(400).json({ ok: false, error: 'Ongeldige ID' })
+    }
 
     const team = await database.collection('teams').findOne({ _id: teamId })
-    const progress = (team?.questionProgress || []).find((item) => String(item.questionId) === String(questionId))
-    if (!progress || Number(progress.hintViews || 0) >= 3) return res.status(403).json({ ok: false, error: 'Hintlimiet bereikt' })
 
-    await database.collection('teams').updateOne(
-      { _id: teamId, 'questionProgress.questionId': questionId },
-      { $inc: { 'questionProgress.$.hintViews': 1 }, $set: { updatedAt: new Date() } }
+    if (!team) {
+      return res.status(404).json({ ok: false, error: 'Team niet gevonden' })
+    }
+
+    const progress = team.questionProgress.find(
+      p => String(p.questionId) === String(questionId)
     )
-    res.json({ ok: true, hintViews: Number(progress.hintViews || 0) + 1 })
-  } catch (error) {
-    next(error)
+
+    if (!progress) {
+      return res.status(404).json({ ok: false, error: 'Vraag niet gevonden' })
+    }
+
+    // fallback naar 3 als undefined
+    const remaining = typeof progress.hintViews === 'number' ? progress.hintViews : 3
+
+    if (remaining <= 0) {
+      return res.status(403).json({ ok: false, error: 'Max aantal hints bereikt' })
+    }
+
+    const newRemaining = remaining - 1
+    await database.collection('teams').updateOne(
+      {
+        _id: teamId,
+        'questionProgress.questionId': questionId
+      },
+      {
+        $set: {
+          'questionProgress.$.hintViews': newRemaining,
+          updatedAt: new Date()
+        }
+      }
+    )
+
+    res.json({
+      ok: true,
+      hintViews: newRemaining
+    })
+
+  } catch (err) {
+    next(err)
   }
 })
 

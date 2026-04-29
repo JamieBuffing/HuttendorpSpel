@@ -1,6 +1,70 @@
 body {
-  background: var(--tussenfase);
-  color: var(--zwart);
+  margin: 0;
+  min-height: 100vh;
+  background: #0B1F3A;
+  overflow-x: hidden;
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  top: -100%;
+  left: -50%;
+  width: 250px;
+  height: 300%;
+  background: var(--JaBuvo2);
+  opacity: 0.24;
+  transform: rotate(45deg);
+  border-radius: 999px;
+  filter: blur(100px);
+  animation: infinite linear 15s backgroundMove;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes backgroundMove {
+  0% {
+    top: -100%;
+    left: -50%;
+    transform: rotate(45deg);
+  }
+  25% {
+    top: -100%;
+    left: 150%;
+    transform: rotate(45deg);
+  }
+  26% {
+    top: 300%;
+    left: 150%;
+    transform: rotate(-45deg);
+  }
+  50% {
+    top: -100%;
+    left: -50%;
+    transform: rotate(-45deg);
+  }
+  75% {
+    top: -100%;
+    left: 150%;
+    transform: rotate(-45deg);
+  }
+  76% {
+    top: -550%;
+    left: 0%;
+    transform: rotate(-45deg);
+  }
+  100% {
+    top: -100%;
+    left: -50%;
+    transform: rotate(45deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
 }
 
 main {
@@ -207,6 +271,7 @@ main section {
 }
 
 .panel {
+  color: var(--JaBuvo1);
   background: var(--wit);
   border: 1px solid var(--JaBuvo5);
   border-radius: 16px;
@@ -232,6 +297,96 @@ textarea { resize: vertical; }
 .dataTable { width: 100%; border-collapse: collapse; }
 .dataTable th, .dataTable td { text-align: left; padding: 12px; border-bottom: 1px solid var(--JaBuvo5); vertical-align: top; }
 .dataTable th { color: var(--JaBuvo1); }
+.leidingStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  margin-bottom: 32px;
+}
+
+.leidingStatCard {
+  background: var(--wit);
+  color: var(--JaBuvo1);
+  border: 1px solid var(--JaBuvo5);
+  border-radius: 16px;
+  padding: 22px;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--JaBuvo1) 8%, var(--wit));
+}
+
+.leidingStatLabel {
+  display: block;
+  font-weight: 800;
+  color: var(--JaBuvo2);
+  margin-bottom: 10px;
+}
+
+.leidingStatValue {
+  display: block;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  line-height: 1;
+  color: var(--JaBuvo1);
+  margin-bottom: 10px;
+}
+
+.leidingStatSub {
+  display: block;
+  color: var(--tekstZacht);
+  line-height: 1.4;
+}
+
+.leidingQuestionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+.leidingQuestionTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--JaBuvo5);
+  border-radius: 14px;
+  background: var(--wit);
+}
+
+.leidingQuestionTable th,
+.leidingQuestionTable td {
+  padding: 14px;
+  border-bottom: 1px solid var(--JaBuvo5);
+  border-right: 1px solid var(--JaBuvo5);
+  text-align: left;
+  vertical-align: top;
+}
+
+.leidingQuestionTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.leidingQuestionTable th:last-child,
+.leidingQuestionTable td:last-child {
+  border-right: 0;
+}
+
+.leidingQuestionTable th {
+  background: color-mix(in srgb, var(--JaBuvo2) 12%, var(--wit));
+  color: var(--JaBuvo1);
+  font-weight: 900;
+}
+
+.leidingQuestionTitle {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--JaBuvo1);
+  background: color-mix(in srgb, var(--JaBuvo1) 5%, var(--wit));
+}
+
+@media (max-width: 900px) {
+  .leidingStatsGrid,
+  .leidingQuestionGrid {
+    grid-template-columns: 1fr;
+  }
+}
 .mutedRow { opacity: .45; background: var(--tussenfase); }
 .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .small { padding: 8px 10px; font-size: .9rem; }
@@ -247,7 +402,7 @@ textarea { resize: vertical; }
 .uploadStatus.error { color: var(--JaBuvo4); font-weight: 700; }
 .hintPreview img, .hintPreview video { max-width: 100%; border-radius: 12px; margin-top: 10px; }
 .footerForm { display: inline; float: right; height: 40px; margin: 5px; align-content: center; }
-.footerLink { background: var(--wit); border: 0; color: var(--JaBuvo2); cursor: pointer; font: inherit; height: 40px; }
+.footerLink { background: none; border: 0; color: var(--JaBuvo2); cursor: pointer; font: inherit; height: 40px; }
 .footerLink:hover { color: var(--JaBuvo3); text-shadow: 1px 1px var(--JaBuvo2); }
 
 @media (max-width: 900px) {
@@ -286,4 +441,115 @@ textarea { resize: vertical; }
   margin-top: 1rem;
   font-size: 1.1rem;
   color: var(--JaBuvo2);
+}
+
+/* OVERLAY BACKDROP */
+.hintOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.hidden {
+  display: none;
+}
+
+/* CARD */
+.hintOverlayCard {
+  width: 80svw;
+  height: 80svh;
+  max-width: 1100px;
+  max-height: 800px;
+
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+
+  padding: 24px;
+  position: relative;
+
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* TITEL */
+.hintOverlayTitle {
+  margin: 0;
+  padding-right: 48px;
+  font-size: 1.6rem;
+  line-height: 1.2;
+}
+
+/* CLOSE BUTTON (jouw huidige class) */
+.hintOverlayClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+
+  border: none;
+  background: var(--danger, red);
+  color: white;
+
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* CONTENT */
+.hintOverlayContent {
+  flex: 1;
+  min-height: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow: auto;
+}
+
+/* MEDIA WRAPPER */
+.hintMediaBox {
+  width: 100%;
+  height: 100%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* IMAGE / VIDEO */
+.hintMediaBox img,
+.hintMediaBox video {
+  max-width: 80%;
+  max-height: 100%;
+
+  width: auto;
+  height: auto;
+
+  object-fit: contain;
+}
+
+/* TEXT */
+.hintTextBox {
+  width: min(80%, 760px);
+  max-height: 100%;
+  overflow: auto;
+  text-align: center;
+}
+
+.hintTextBox h1,
+.hintTextBox h2,
+.hintTextBox h3 {
+  margin-bottom: 10px;
+}
+
+.hintTextBox strong {
+  font-weight: bold;
 }

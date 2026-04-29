@@ -1,0 +1,142 @@
+<%- include('../partials/page-shell-start', { title: 'Overzicht leiding' }); %>
+
+<section class="panel">
+  <h1>Overzicht leiding</h1>
+  <p>Live overzicht van alle normale vragen, antwoorden en voortgang per team.</p>
+</section>
+
+<section class="leidingStatsGrid">
+  <article class="leidingStatCard">
+    <span class="leidingStatLabel">Totaal beantwoord</span>
+    <strong class="leidingStatValue">
+      <%= overview.stats.answeredTotal %>/<%= overview.stats.totalPossibleAnswers %>
+    </strong>
+    <span class="leidingStatSub">
+      <%= overview.stats.totalQuestions %> vragen × <%= overview.stats.totalTeams %> teams
+    </span>
+  </article>
+
+  <article class="leidingStatCard">
+    <span class="leidingStatLabel">Snelste team</span>
+    <strong class="leidingStatValue">
+      <% if (overview.stats.fastestTeam) { %>
+        <%= overview.stats.fastestTeam.answeredCount %>/<%= overview.stats.totalQuestions %>
+      <% } else { %>
+        0/<%= overview.stats.totalQuestions %>
+      <% } %>
+    </strong>
+    <span class="leidingStatSub">
+      <%= overview.stats.fastestTeam?.team?.name || 'Nog geen teams' %>
+    </span>
+  </article>
+
+  <article class="leidingStatCard">
+    <span class="leidingStatLabel">Langzaamste team</span>
+    <strong class="leidingStatValue">
+      <% if (overview.stats.slowestTeam) { %>
+        <%= overview.stats.slowestTeam.answeredCount %>/<%= overview.stats.totalQuestions %>
+      <% } else { %>
+        0/<%= overview.stats.totalQuestions %>
+      <% } %>
+    </strong>
+    <span class="leidingStatSub">
+      <%= overview.stats.slowestTeam?.team?.name || 'Nog geen teams' %>
+    </span>
+  </article>
+
+  <article class="leidingStatCard">
+    <span class="leidingStatLabel">Gametime</span>
+    <strong
+      class="leidingStatValue"
+      id="leidingGameTime"
+      data-ms="<%= overview.stats.gameTimeMs || 0 %>"
+      data-running="<%= overview.stats.gameTimeIsRunning ? 'true' : 'false' %>"
+    >
+      00:00
+    </strong>
+    <span class="leidingStatSub">
+      <% if (overview.stats.firstAnswerAt && overview.stats.lastAnswerAt) { %>
+        <%= overview.stats.gameTimeIsRunning ? 'Loopt door tot 10 min na laatste antwoord' : 'Gestopt op laatste antwoord' %>
+      <% } else { %>
+        Nog geen antwoorden
+      <% } %>
+    </span>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="sectionHeader">
+    <div>
+      <h2>Vragenoverzicht</h2>
+      <p>Per vraag zie je hoeveel teams hebben geantwoord en hoe de antwoorden verdeeld zijn.</p>
+    </div>
+  </div>
+
+  <% if (!overview.rows.length) { %>
+    <p>Er zijn nog geen normale vragen aangemaakt.</p>
+  <% } %>
+
+  <div class="leidingQuestionGrid">
+    <% overview.rows.forEach((row) => { %>
+      <table class="leidingQuestionTable">
+        <tbody>
+          <tr>
+            <th>PostID = <%= row.question.postId %></th>
+            <th colspan="2"><%= row.answeredCount %>/<%= row.totalTeams %> teams</th>
+          </tr>
+
+          <tr>
+            <td colspan="3" class="leidingQuestionTitle">
+              <%= row.question.title %>
+            </td>
+          </tr>
+
+          <tr>
+            <td><strong>R =</strong> <%= row.counts.R %></td>
+            <td><strong>G =</strong> <%= row.counts.G %></td>
+            <td><strong>B =</strong> <%= row.counts.B %></td>
+          </tr>
+
+          <tr>
+            <td colspan="3">
+              <strong>Totaal antwoorden =</strong> <%= row.totalAnswers %>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    <% }) %>
+  </div>
+</section>
+
+<script>
+  const gameTimeElement = document.getElementById('leidingGameTime')
+
+  function formatGameTime(ms) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+
+    if (hours > 0) {
+      return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    }
+
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  }
+
+  if (gameTimeElement) {
+    let elapsedMs = Number(gameTimeElement.dataset.ms || 0)
+    const isRunning = gameTimeElement.dataset.running === 'true'
+
+    gameTimeElement.textContent = formatGameTime(elapsedMs)
+
+    if (isRunning) {
+      setInterval(() => {
+        elapsedMs += 1000
+        gameTimeElement.textContent = formatGameTime(elapsedMs)
+      }, 1000)
+    }
+  }
+</script>
+
+<%- include('../partials/page-shell-end'); %>

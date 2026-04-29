@@ -1,4 +1,5 @@
 body footer {
+  color: var(--JaBuvo1);
   position: static;
   border-top: solid;
   border-color: var(--JaBuvo1);

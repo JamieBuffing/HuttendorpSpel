@@ -9,3 +9,10 @@
   --tussenfase: #111111;
   --tekstZacht: #c5c5c5;
 }
+:root {
+  --card-bg: #0B1F3A;
+  --text: #2F80ED;
+  --border: #6C5CE7;
+  --radius-lg: 12px;
+  --shadow-lg: 0 10px 30px rgba(0,0,0,0.2);
+}

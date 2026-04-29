@@ -1,15 +1,22 @@
 <%- include('../partials/page-shell-start', { title: 'Dashboard' }); %>
+
 <section class="panel">
   <h1>Team dashboard</h1>
   <p>Scan een teamkaart om de antwoorden op tijdsvolgorde te bekijken.</p>
+
   <form method="get" action="/dashboard" class="gridForm two">
-    <label>Kaart ID<input name="cardId" value="<%= cardId || '' %>" placeholder="Scan kaart..." autofocus></label>
+    <label>
+      Kaart ID
+      <input name="cardId" value="<%= cardId || '' %>" placeholder="Scan kaart..." autofocus>
+    </label>
     <button class="button" type="submit">Open dashboard</button>
   </form>
 </section>
 
 <% if (cardId && !team) { %>
-  <section class="panel"><p class="error">Geen team gevonden voor kaart <code><%= cardId %></code>.</p></section>
+  <section class="panel">
+    <p class="error">Geen team gevonden voor kaart <code><%= cardId %></code>.</p>
+  </section>
 <% } %>
 
 <% if (team) { %>
@@ -19,25 +26,59 @@
       <h2><%= team.name %></h2>
       <p>Totaal: <strong><%= team.totalPoints || 0 %> punten</strong></p>
     </div>
+
     <a class="button dangerButton" href="/dashboard">Sluit dashboard</a>
   </div>
+
   <table class="dataTable">
-    <thead><tr><th>Tijd</th><th>Vraag</th><th>Antwoord</th><th>Punten</th><th>Hint</th></tr></thead>
+    <thead>
+      <tr>
+        <th>Tijd</th>
+        <th>Vraag</th>
+        <th>Antwoord</th>
+        <th>Punten</th>
+        <th>Hint</th>
+      </tr>
+    </thead>
+
     <tbody>
       <% progressRows.forEach(({ progress, question }) => { %>
         <tr>
-          <td><%= progress.answeredAt ? new Date(progress.answeredAt).toLocaleString('nl-NL') : '-' %></td>
-          <td><%= question?.title || 'Vraag verwijderd' %></td>
-          <td><%= progress.type === 'final' ? (progress.isCorrect ? 'Goed' : 'Fout') : progress.selectedAnswer %></td>
-          <td><%= progress.pointsEarned || 0 %></td>
           <td>
-            <% if (progress.type === 'normal' && question) { const selected = (question.answers || []).find((a) => a.key === progress.selectedAnswer); const hint = selected && selected.hint; %>
-              <% if (hint && (progress.hintViews || 0) < 3) { %>
-                <details><summary>Bekijk hint (<%= progress.hintViews || 0 %>/3)</summary>
-                  <% if (hint.type === 'text') { %><p><%= hint.value %></p><% } %>
-                  <% if (hint.type === 'image') { %><img class="hintImage" src="<%= hint.value %>" alt="Hint"><% } %>
-                  <% if (hint.type === 'video') { %><video class="hintVideo" src="<%= hint.value %>" controls></video><% } %>
-                </details>
+            <%= progress.answeredAt ? new Date(progress.answeredAt).toLocaleString('nl-NL') : '-' %>
+          </td>
+
+          <td>
+            <%= question?.title || 'Vraag verwijderd' %>
+          </td>
+
+          <td>
+            <%= progress.type === 'final' ? (progress.isCorrect ? 'Goed' : 'Fout') : progress.selectedAnswer %>
+          </td>
+
+          <td>
+            <%= progress.pointsEarned || 0 %>
+          </td>
+
+          <td>
+            <% if (progress.type === 'normal' && question) { %>
+              <%
+                const selected = (question.answers || []).find((a) => a.key === progress.selectedAnswer);
+                const hint = selected && selected.hint;
+                const remaining = typeof progress.hintViews === 'number' ? progress.hintViews : 3;
+              %>
+
+              <% if (hint && remaining > 0) { %>
+                <button
+                  type="button"
+                  class="button hintOpenButton"
+                  data-team-id="<%= team._id %>"
+                  data-question-id="<%= question._id %>"
+                  data-hint-type="<%= hint.type %>"
+                  data-hint-value="<%= encodeURIComponent(hint.value || '') %>"
+                >
+                  Bekijk hint (<span class="hintViewCount"><%= remaining %></span> over)
+                </button>
               <% } else if (hint) { %>
                 Limiet bereikt
               <% } else { %>
@@ -53,4 +94,123 @@
   </table>
 </section>
 <% } %>
+
+<div id="hintOverlay" class="hintOverlay hidden" aria-hidden="true">
+  <div class="hintOverlayBackdrop" data-close-hint></div>
+
+  <div class="hintOverlayCard" role="dialog" aria-modal="true" aria-label="Hint">
+    <button type="button" class="hintOverlayClose" data-close-hint>×</button>
+    <h2 class="hintOverlayTitle">Bekijk jullie hint</h2>
+    <div id="hintOverlayContent" class="hintOverlayContent"></div>
+  </div>
+</div>
+
+<script>
+  const hintOverlay = document.getElementById('hintOverlay')
+  const hintOverlayContent = document.getElementById('hintOverlayContent')
+
+  document.querySelectorAll('.hintOpenButton').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const teamId = button.dataset.teamId
+      const questionId = button.dataset.questionId
+      const hintType = button.dataset.hintType
+      const hintValue = decodeURIComponent(button.dataset.hintValue || '')
+
+      const response = await fetch('/api/hints/view', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamId, questionId })
+      })
+
+      const result = await response.json()
+
+      if (!result.ok) {
+        alert(result.error || 'Hint kon niet worden geopend.')
+        return
+      }
+
+      const countElement = button.querySelector('.hintViewCount')
+      if (countElement) countElement.textContent = result.hintViews
+
+      if (result.hintViews <= 0) {
+        button.disabled = true
+        button.textContent = 'Limiet bereikt'
+      }
+
+      openHintOverlay(hintType, hintValue)
+    })
+  })
+
+  document.querySelectorAll('[data-close-hint]').forEach((element) => {
+    element.addEventListener('click', closeHintOverlay)
+  })
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeHintOverlay()
+  })
+
+  function openHintOverlay(type, value) {
+    hintOverlayContent.innerHTML = renderHint(type, value)
+    hintOverlay.classList.remove('hidden')
+    hintOverlay.setAttribute('aria-hidden', 'false')
+  }
+
+  function closeHintOverlay() {
+    hintOverlay.classList.add('hidden')
+    hintOverlay.setAttribute('aria-hidden', 'true')
+
+    const video = hintOverlayContent.querySelector('video')
+    if (video) video.pause()
+  }
+
+  function renderHint(type, value) {
+    if (type === 'image') {
+      return `
+        <div class="hintMediaBox">
+          <img src="${escapeAttribute(value)}" alt="Hint">
+        </div>
+      `
+    }
+
+    if (type === 'video') {
+      return `
+        <div class="hintMediaBox">
+          <video src="${escapeAttribute(value)}" controls playsinline></video>
+        </div>
+      `
+    }
+
+    return `
+      <div class="hintTextBox">
+        ${markdownToHtml(value)}
+      </div>
+    `
+  }
+
+  function markdownToHtml(markdown) {
+    const safe = escapeHtml(markdown || '')
+
+    return safe
+      .replace(/^### (.*)$/gim, '<h3>$1</h3>')
+      .replace(/^## (.*)$/gim, '<h2>$1</h2>')
+      .replace(/^# (.*)$/gim, '<h1>$1</h1>')
+      .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/gim, '<em>$1</em>')
+      .replace(/\n/g, '<br>')
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;')
+  }
+
+  function escapeAttribute(value) {
+    return escapeHtml(value)
+  }
+</script>
+
 <%- include('../partials/page-shell-end'); %>
