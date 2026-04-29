@@ -52,6 +52,10 @@ router.post('/logout', (req, res) => {
 
 router.get('/dashboard', async (req, res, next) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private')
+    res.setHeader('Pragma', 'no-cache')
+    res.setHeader('Expires', '0')
+
     const database = await db()
     const cardId = String(req.query.cardId || '').trim()
     let team = null

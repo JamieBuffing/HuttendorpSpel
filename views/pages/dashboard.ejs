@@ -7,20 +7,29 @@
   <form method="get" action="/dashboard" class="gridForm two">
     <label>
       Kaart ID
-      <input name="cardId" value="<%= cardId || '' %>" placeholder="Scan kaart..." autofocus>
+      <input
+        name="cardId"
+        value="<%= cardId || '' %>"
+        placeholder="Scan kaart..."
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        autofocus
+      >
     </label>
     <button class="button" type="submit">Open dashboard</button>
   </form>
 </section>
 
 <% if (cardId && !team) { %>
-  <section class="panel">
+  <section class="panel dashboardCardError">
     <p class="error">Geen team gevonden voor kaart <code><%= cardId %></code>.</p>
   </section>
 <% } %>
 
 <% if (team) { %>
-<section class="panel">
+<section class="panel dashboardTeamPanel">
   <div class="sectionHeader dashboardHeader">
     <div>
       <h2><%= team.name %></h2>
@@ -106,6 +115,52 @@
 </div>
 
 <script>
+  function clearCardIdInput() {
+    const cardIdInput = document.querySelector('input[name="cardId"]')
+    if (cardIdInput) cardIdInput.value = ''
+  }
+
+  function clearDashboardState() {
+    const cardError = document.querySelector('.dashboardCardError')
+    if (cardError) cardError.remove()
+
+    const teamPanel = document.querySelector('.dashboardTeamPanel')
+    if (teamPanel) teamPanel.remove()
+  }
+
+  function focusCardInput() {
+    const input = document.querySelector('input[name="cardId"]')
+    if (!input) return
+
+    input.focus()
+    input.select()
+  }
+
+  if (window.location.search.includes('cardId=')) {
+    history.replaceState(null, '', '/dashboard')
+    clearCardIdInput()
+  }
+
+  focusCardInput()
+
+  window.addEventListener('pageshow', (event) => {
+    const navigationEntry = performance.getEntriesByType('navigation')[0]
+    const isBackForward = event.persisted || navigationEntry?.type === 'back_forward'
+
+    clearCardIdInput()
+    focusCardInput()
+
+    if (isBackForward) {
+      clearDashboardState()
+    }
+  })
+
+  window.addEventListener('popstate', () => {
+    clearCardIdInput()
+    clearDashboardState()
+    focusCardInput()
+  })
+
   const hintOverlay = document.getElementById('hintOverlay')
   const hintOverlayContent = document.getElementById('hintOverlayContent')
 
@@ -211,6 +266,32 @@
   function escapeAttribute(value) {
     return escapeHtml(value)
   }
+
+  document.addEventListener('contextmenu', (event) => {
+    event.preventDefault()
+  })
+
+  document.addEventListener('keydown', (event) => {
+    const key = event.key.toLowerCase()
+
+    const blockedCtrlKeys = ['w', 'h', 'j', 'i', 'c', 'v', 'x', 'u', 's', 'p', 'r', 'n', 't', 'l', 'o', 'a', 'f', 'k', 'd', 'n']
+
+    const blockedFKeys = [
+      'f1','f3','f5','f6','f7','f8','f10','f11','f12'
+    ]
+
+    if (
+      blockedFKeys.includes(key) ||
+      (event.altKey && ['arrowleft', 'arrowright', 'f4'].includes(key)) ||
+      (event.ctrlKey && blockedCtrlKeys.includes(key)) ||
+      (event.ctrlKey && event.shiftKey && blockedCtrlKeys.includes(key)) ||
+      (event.metaKey && blockedCtrlKeys.includes(key))
+    ) {
+      event.preventDefault()
+      event.stopPropagation()
+      return false
+    }
+  })
 </script>
 
 <%- include('../partials/page-shell-end'); %>
