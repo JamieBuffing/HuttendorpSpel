@@ -20,6 +20,8 @@
     </label>
     <button class="button" type="submit">Open dashboard</button>
   </form>
+
+  <%- include('../partials/nfc-card-scanner', { inputName: 'cardId', autoSubmit: true }); %>
 </section>
 
 <% if (cardId && !team) { %>

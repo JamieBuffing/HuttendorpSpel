@@ -6,6 +6,8 @@
     <label>Teamnaam<input name="name" placeholder="Team Rood" required></label>
     <button class="button" type="submit">Team opslaan</button>
   </form>
+
+  <%- include('../partials/nfc-card-scanner', { inputName: 'cardId', autoSubmit: false }); %>
 </section>
 <section class="panel">
   <h2>Teams</h2>

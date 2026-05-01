@@ -7,7 +7,7 @@
 <main>
   <section class="pageHero"><p class="eyebrow">Game setup</p><h1>Teams instellen</h1><p>Scan een NFC-kaart en koppel deze aan een teamnaam.</p></section>
   <section class="cardGrid twoCols">
-    <article class="panel"><h2>Nieuw team</h2><form class="stackForm"><label>Kaart ID<input placeholder="Scan kaart..." /></label><label>Teamnaam<input placeholder="Team Rood" /></label><button class="button" type="button">Team aanmaken</button></form></article>
+    <article class="panel"><h2>Nieuw team</h2><form class="stackForm"><label>Kaart ID<input name="cardId" placeholder="Scan kaart..." /></label><label>Teamnaam<input placeholder="Team Rood" /></label><button class="button" type="button">Team aanmaken</button></form><%- include('../partials/nfc-card-scanner', { inputName: 'cardId', autoSubmit: false }); %></article>
     <article class="panel"><h2>Teams</h2><div class="tableWrap"><table><thead><tr><th>Team</th><th>Kaart</th><th>Punten</th></tr></thead><tbody><tr><td>Nog geen team</td><td>-</td><td>0</td></tr></tbody></table></div></article>
   </section>
 </main>

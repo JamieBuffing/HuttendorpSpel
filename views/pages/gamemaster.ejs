@@ -6,6 +6,8 @@
     <label>Kaart ID<input name="cardId" value="<%= cardId || '' %>" placeholder="Scan kaart..." autofocus></label>
     <button class="button" type="submit">Team openen</button>
   </form>
+
+  <%- include('../partials/nfc-card-scanner', { inputName: 'cardId', autoSubmit: true }); %>
 </section>
 
 <% if (cardId && !team) { %>

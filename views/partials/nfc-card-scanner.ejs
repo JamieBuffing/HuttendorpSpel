@@ -1,0 +1,65 @@
+<div class="nfcScanner yesPhone" data-nfc-scanner data-auto-submit="<%= autoSubmit ? 'true' : 'false' %>">
+  <button class="button" type="button" data-nfc-start>Scan kaart met telefoon</button>
+  <p class="nfcScannerStatus" data-nfc-status>NFC scan staat uit.</p>
+</div>
+
+<script>
+  (() => {
+    const scanner = document.querySelector('[data-nfc-scanner]')
+    if (!scanner) return
+
+    const startButton = scanner.querySelector('[data-nfc-start]')
+    const status = scanner.querySelector('[data-nfc-status]')
+    const autoSubmit = scanner.dataset.autoSubmit === 'true'
+    const input = document.querySelector('input[name="<%= inputName %>"]')
+
+    if (!input) return
+
+    if (!('NDEFReader' in window)) {
+      status.textContent = 'NFC scannen werkt alleen op ondersteunde Android browsers.'
+      startButton.disabled = true
+      return
+    }
+
+    startButton.addEventListener('click', async () => {
+      try {
+        const ndef = new NDEFReader()
+        await ndef.scan()
+
+        status.textContent = 'Houd de kaart tegen je telefoon...'
+
+        ndef.addEventListener('reading', (event) => {
+          const cardId = getCardIdFromNfcEvent(event)
+
+          if (!cardId) {
+            status.textContent = 'Kaart gelezen, maar geen kaart ID gevonden.'
+            return
+          }
+
+          input.value = cardId
+          status.textContent = `Kaart gelezen: ${cardId}`
+
+          if (autoSubmit && input.form) {
+            input.form.submit()
+          }
+        })
+      } catch (error) {
+        status.textContent = error.message || 'NFC scan kon niet gestart worden.'
+      }
+    })
+
+    function getCardIdFromNfcEvent(event) {
+      for (const record of event.message.records) {
+        if (record.recordType === 'text') {
+          return new TextDecoder(record.encoding || 'utf-8').decode(record.data).trim()
+        }
+
+        if (record.recordType === 'url') {
+          return new TextDecoder().decode(record.data).trim()
+        }
+      }
+
+      return event.serialNumber || ''
+    }
+  })()
+</script>

@@ -553,3 +553,22 @@ textarea { resize: vertical; }
 .hintTextBox strong {
   font-weight: bold;
 }
+.nfcScanner.yesPhone {
+  display: none;
+}
+
+.nfcScanner {
+  margin-top: 12px;
+}
+
+.nfcScannerStatus {
+  margin-top: 8px;
+  font-size: 0.95rem;
+  color: var(--tekstZacht);
+}
+
+@media (max-width: 700px) {
+  .nfcScanner.yesPhone {
+    display: block;
+  }
+}
