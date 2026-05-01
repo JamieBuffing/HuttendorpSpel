@@ -1,7 +1,10 @@
-<details class="mobileNavDropdown yesPhone">
-  <summary>Menu</summary>
+<div class="mobileNavDropdown yesPhone" data-mobile-nav>
+  <button class="mobileNavDropdownButton" type="button" aria-expanded="false" aria-controls="mobileNavDropdownPanel" data-mobile-nav-button>
+    <span>Menu</span>
+    <span class="mobileNavDropdownIcon" aria-hidden="true"></span>
+  </button>
 
-  <div class="mobileNavDropdownLinks">
+  <div class="mobileNavDropdownPanel" id="mobileNavDropdownPanel" hidden data-mobile-nav-panel>
     <a href="/dashboard">Dashboard</a>
 
     <% if (isAdminLoggedIn) { %>
@@ -13,4 +16,48 @@
       <a href="/gamemaster">Gamemaster</a>
     <% } %>
   </div>
-</details>
+</div>
+
+<script>
+  (() => {
+    const mobileNav = document.querySelector('[data-mobile-nav]')
+    if (!mobileNav) return
+
+    const button = mobileNav.querySelector('[data-mobile-nav-button]')
+    const panel = mobileNav.querySelector('[data-mobile-nav-panel]')
+    if (!button || !panel) return
+
+    const closeMenu = () => {
+      mobileNav.classList.remove('is-open')
+      button.setAttribute('aria-expanded', 'false')
+      panel.hidden = true
+    }
+
+    const openMenu = () => {
+      mobileNav.classList.add('is-open')
+      button.setAttribute('aria-expanded', 'true')
+      panel.hidden = false
+    }
+
+    button.addEventListener('click', () => {
+      if (mobileNav.classList.contains('is-open')) {
+        closeMenu()
+        return
+      }
+
+      openMenu()
+    })
+
+    document.addEventListener('click', (event) => {
+      if (!mobileNav.contains(event.target)) {
+        closeMenu()
+      }
+    })
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeMenu()
+      }
+    })
+  })()
+</script>
