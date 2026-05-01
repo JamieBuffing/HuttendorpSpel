@@ -19,3 +19,24 @@ body header nav a {
 body header nav a img {
   height: inherit;
 }
+
+.mobileTabs {
+  width: 90%;
+  max-width: 1100px;
+  margin: 10px auto 0;
+  padding: 10px;
+  border: 2px solid var(--JaBuvo1);
+  border-radius: 10px;
+  background: var(--wit);
+}
+
+.mobileTabs a {
+  display: block;
+  padding: 12px;
+  border-bottom: 1px solid var(--JaBuvo1);
+  font-weight: 700;
+}
+
+.mobileTabs a:last-child {
+  border-bottom: 0;
+}
