@@ -161,6 +161,33 @@ router.post('/api/esp32/answer', async (req, res, next) => {
   }
 })
 
+
+router.post('/api/nfc/scan', (req, res) => {
+  const expectedToken = String(process.env.NFC_BRIDGE_TOKEN || '').trim()
+  const providedToken = String(req.headers['x-nfc-token'] || req.body.token || '').trim()
+
+  if (!expectedToken) {
+    return res.status(503).json({ ok: false, error: 'NFC bridge token ontbreekt op server' })
+  }
+
+  if (!providedToken || providedToken !== expectedToken) {
+    return res.status(401).json({ ok: false, error: 'Ongeldige NFC bridge token' })
+  }
+
+  const uid = String(req.body.uid || '').trim().toUpperCase()
+  if (!uid) {
+    return res.status(400).json({ ok: false, error: 'UID ontbreekt' })
+  }
+
+  const broadcastCardScan = req.app?.locals?.broadcastCardScan
+  if (typeof broadcastCardScan !== 'function') {
+    return res.status(503).json({ ok: false, error: 'WebSocket broadcast niet beschikbaar' })
+  }
+
+  broadcastCardScan(uid)
+  res.json({ ok: true, uid })
+})
+
 router.post('/api/hints/view', async (req, res, next) => {
   try {
     const database = await db()

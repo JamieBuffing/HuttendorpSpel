@@ -33,6 +33,15 @@ function setupWebSocketServer(server) {
     })
   }
 
+  const broadcastCard = (uid) => {
+    const cleanUid = String(uid || '').trim().toUpperCase()
+    if (!cleanUid) return false
+    broadcast({ type: 'card', uid: cleanUid })
+    return true
+  }
+
+  app.locals.broadcastCardScan = broadcastCard
+
   wss.on('connection', (ws) => {
     clients.add(ws)
     console.log('Client connected')
@@ -51,7 +60,7 @@ function setupWebSocketServer(server) {
   })
 
   nfcService.on('card', ({ uid }) => {
-    broadcast({ type: 'card', uid })
+    broadcastCard(uid)
   })
 
   return wss
