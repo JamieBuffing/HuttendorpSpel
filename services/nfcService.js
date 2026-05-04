@@ -1,4 +1,3 @@
-const { NFC } = require('nfc-pcsc')
 const EventEmitter = require('events')
 
 class NfcService extends EventEmitter {
@@ -8,14 +7,25 @@ class NfcService extends EventEmitter {
     this.hasStarted = false
     this.lastUid = ''
     this.lastUidAt = 0
+    this.isAvailable = false
   }
 
   start() {
     if (this.hasStarted) return
     this.hasStarted = true
 
+    let NFC
+
+    try {
+      ;({ NFC } = require('nfc-pcsc'))
+    } catch (error) {
+      console.warn('[NFC] nfc-pcsc niet beschikbaar. Installeer lokaal met: npm install nfc-pcsc')
+      return
+    }
+
     try {
       this.nfc = new NFC()
+      this.isAvailable = true
 
       this.nfc.on('reader', (reader) => {
         console.log('Reader connected')
