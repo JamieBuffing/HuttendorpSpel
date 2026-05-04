@@ -1,7 +1,10 @@
 require('dotenv').config({ quiet: true })
 
+const http = require('http')
+const WebSocket = require('ws')
 const app = require('./app')
 const os = require('os')
+const nfcService = require('./services/nfcService')
 
 console.log('\x1b[34m -----   Huttendorp spel   ----- \x1b[0m')
 console.log('\x1b[32m Back-end start op \x1b[0m')
@@ -16,10 +19,61 @@ function getLocalIP() {
   return null
 }
 
+function setupWebSocketServer(server) {
+  const wss = new WebSocket.Server({ server })
+  const clients = new Set()
+
+  const broadcast = (payload) => {
+    const message = JSON.stringify(payload)
+
+    clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message)
+      }
+    })
+  }
+
+  const broadcastCard = (uid) => {
+    const cleanUid = String(uid || '').trim().toUpperCase()
+    if (!cleanUid) return false
+    broadcast({ type: 'card', uid: cleanUid })
+    return true
+  }
+
+  app.locals.broadcastCardScan = broadcastCard
+
+  wss.on('connection', (ws) => {
+    clients.add(ws)
+    console.log('Client connected')
+
+    ws.on('close', () => {
+      clients.delete(ws)
+    })
+
+    ws.on('error', (error) => {
+      console.error('[WebSocket] Client error:', error?.message || error)
+    })
+  })
+
+  wss.on('error', (error) => {
+    console.error('[WebSocket] Server error:', error?.message || error)
+  })
+
+  nfcService.on('card', ({ uid }) => {
+    broadcastCard(uid)
+  })
+
+  return wss
+}
+
 module.exports = app
 
 if (process.env.VERCEL !== '1') {
-  app.listen(1188, '0.0.0.0', () => {
+  const server = http.createServer(app)
+  setupWebSocketServer(server)
+  nfcService.start()
+
+  server.listen(1188, '0.0.0.0', () => {
     const ip = getLocalIP()
 
     console.log('\x1b[32m Front-end start op \x1b[0m')
