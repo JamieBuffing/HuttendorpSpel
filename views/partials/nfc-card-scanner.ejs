@@ -1,5 +1,7 @@
 <div class="nfcScanner yesPhone" data-card-scanner-status-wrap>
-  <p class="nfcScannerStatus" data-card-scanner-status>Telefoon NFC start automatisch na je eerste tik op deze pagina.</p>
+  <p class="nfcScannerStatus" data-card-scanner-status>Wachten op NFC scanner...</p>
+  <small data-card-scanner-debug hidden></small>
+  <button type="button" data-card-scanner-test hidden>Test UID invullen</button>
 </div>
 
 <script>
@@ -7,12 +9,29 @@
     const inputName = '<%= inputName %>'
     const autoSubmit = <%= autoSubmit ? 'true' : 'false' %>
     const status = document.querySelector('[data-card-scanner-status]')
+    const debugEl = document.querySelector('[data-card-scanner-debug]')
+    const testButton = document.querySelector('[data-card-scanner-test]')
     const input = document.querySelector(`input[name="${inputName}"]:not([type="hidden"])`)
+    const nfcDebug = new URLSearchParams(window.location.search).get('nfcDebug') === '1'
 
     if (!input) return
 
+    const state = {
+      wsStatus: 'disconnected',
+      lastUid: '',
+      lastUidAt: 0
+    }
+
     const setStatus = (message) => {
       if (status) status.textContent = message
+      updateDebugInfo()
+    }
+
+    const updateDebugInfo = () => {
+      if (!nfcDebug || !debugEl) return
+
+      debugEl.hidden = false
+      debugEl.textContent = `WS: ${state.wsStatus} | Laatste UID: ${state.lastUid || '-'}`
     }
 
     const fillCardInput = (cardId, source) => {
@@ -34,10 +53,79 @@
       }
     }
 
+    const handleRemoteCard = (uid) => {
+      const cleanUid = String(uid || '').trim().toUpperCase()
+      if (!cleanUid) return
+
+      const now = Date.now()
+      if (state.lastUid === cleanUid && now - state.lastUidAt < 1000) return
+
+      state.lastUid = cleanUid
+      state.lastUidAt = now
+      fillCardInput(cleanUid, 'Kaart gescand')
+    }
+
     window.fillCardInputFromScan = fillCardInput
 
     startKeyboardScanner(fillCardInput)
     startMobileNfcScanner(fillCardInput, setStatus)
+    startSocketScanner(handleRemoteCard, setStatus)
+
+    if (nfcDebug && testButton) {
+      testButton.hidden = false
+      testButton.addEventListener('click', () => {
+        fillCardInput('TEST-UID', 'Debug test')
+      })
+    }
+
+    function startSocketScanner(onScan, setStatus) {
+      let socket = null
+      let reconnectTimer = null
+
+      const connect = () => {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        socket = new WebSocket(`${protocol}//${window.location.host}`)
+        state.wsStatus = 'connecting'
+        updateDebugInfo()
+
+        socket.addEventListener('open', () => {
+          state.wsStatus = 'connected'
+          setStatus('Wachten op NFC scanner...')
+        })
+
+        socket.addEventListener('message', (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            if (message?.type === 'card') {
+              onScan(message.uid)
+            }
+          } catch (error) {
+            if (nfcDebug) console.warn('[NFC] Ongeldig bericht:', error)
+          }
+        })
+
+        socket.addEventListener('close', () => {
+          state.wsStatus = 'disconnected'
+          setStatus('NFC scanner niet verbonden')
+          reconnectTimer = setTimeout(connect, 2000)
+        })
+
+        socket.addEventListener('error', () => {
+          state.wsStatus = 'error'
+          setStatus('NFC scanner niet verbonden')
+          if (socket) socket.close()
+        })
+      }
+
+      connect()
+
+      window.addEventListener('beforeunload', () => {
+        if (reconnectTimer) clearTimeout(reconnectTimer)
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.close()
+        }
+      })
+    }
 
     function startKeyboardScanner(onScan) {
       let buffer = ''
@@ -76,12 +164,10 @@
 
     function startMobileNfcScanner(onScan, setStatus) {
       if (!('NDEFReader' in window)) {
-        setStatus('NFC via browser wordt alleen ondersteund op geschikte Android browsers. Een losse scanner werkt wel.')
         return
       }
 
       if (!window.isSecureContext) {
-        setStatus('NFC werkt alleen via HTTPS. Een losse scanner werkt wel.')
         return
       }
 
@@ -98,7 +184,7 @@
           await ndef.scan()
 
           hasStarted = true
-          setStatus('NFC staat aan. Houd een kaart tegen je telefoon.')
+          setStatus('NFC telefoonlezer staat aan. Houd een kaart tegen je telefoon.')
 
           ndef.addEventListener('reading', (event) => {
             const cardId = getCardIdFromNfcEvent(event)
@@ -111,7 +197,9 @@
             onScan(cardId, 'NFC gelezen')
           })
         } catch (error) {
-          setStatus(error.message || 'NFC kon niet gestart worden.')
+          if (nfcDebug) {
+            setStatus(error.message || 'NFC kon niet gestart worden.')
+          }
         } finally {
           isStarting = false
         }
