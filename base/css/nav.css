@@ -20,6 +20,20 @@ body header nav a img {
   height: inherit;
 }
 
+.downloadApp {
+  display: block;
+  width: 250px;
+  position: relative;
+  float: right;
+  text-align: center;
+  background-color: var(--JaBuvo2);
+  color: var(--wit) !important;
+  font-weight: 700;
+  border: 1px solid var(--JaBuvo2);
+  padding: 5px 18px;
+  border-radius: 10px;
+}
+
 .mobileNavDropdown.yesPhone {
   display: none;
 }
