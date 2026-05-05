@@ -17,21 +17,12 @@
     if (!input) return
 
     const state = {
-      wsStatus: 'disconnected',
       lastUid: '',
       lastUidAt: 0
     }
 
     const setStatus = (message) => {
       if (status) status.textContent = message
-      updateDebugInfo()
-    }
-
-    const updateDebugInfo = () => {
-      if (!nfcDebug || !debugEl) return
-
-      debugEl.hidden = false
-      debugEl.textContent = `WS: ${state.wsStatus} | Laatste UID: ${state.lastUid || '-'}`
     }
 
     const fillCardInput = (cardId, source) => {
@@ -69,61 +60,11 @@
 
     startKeyboardScanner(fillCardInput)
     startMobileNfcScanner(fillCardInput, setStatus)
-    startSocketScanner(handleRemoteCard, setStatus)
 
     if (nfcDebug && testButton) {
       testButton.hidden = false
       testButton.addEventListener('click', () => {
         fillCardInput('TEST-UID', 'Debug test')
-      })
-    }
-
-    function startSocketScanner(onScan, setStatus) {
-      let socket = null
-      let reconnectTimer = null
-
-      const connect = () => {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        socket = new WebSocket(`${protocol}//${window.location.host}`)
-        state.wsStatus = 'connecting'
-        updateDebugInfo()
-
-        socket.addEventListener('open', () => {
-          state.wsStatus = 'connected'
-          setStatus('Wachten op NFC scanner...')
-        })
-
-        socket.addEventListener('message', (event) => {
-          try {
-            const message = JSON.parse(event.data)
-            if (message?.type === 'card') {
-              onScan(message.uid)
-            }
-          } catch (error) {
-            if (nfcDebug) console.warn('[NFC] Ongeldig bericht:', error)
-          }
-        })
-
-        socket.addEventListener('close', () => {
-          state.wsStatus = 'disconnected'
-          setStatus('NFC scanner niet verbonden')
-          reconnectTimer = setTimeout(connect, 2000)
-        })
-
-        socket.addEventListener('error', () => {
-          state.wsStatus = 'error'
-          setStatus('NFC scanner niet verbonden')
-          if (socket) socket.close()
-        })
-      }
-
-      connect()
-
-      window.addEventListener('beforeunload', () => {
-        if (reconnectTimer) clearTimeout(reconnectTimer)
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.close()
-        }
       })
     }
 
