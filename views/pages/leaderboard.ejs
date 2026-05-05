@@ -2,7 +2,6 @@
 
 <section class="panel">
   <h1>Leaderboard</h1>
-  <p>Teams met alle verplichte eindvragen goed staan altijd bovenaan. Teams die een verplichte eindvraag missen of fout hebben worden grijs getoond.</p>
 
   <% 
     const scoredTeams = teams.filter(team => Number(team.totalPoints || 0) > 0);
@@ -26,7 +25,7 @@
         <th>#</th>
         <th>Team</th>
         <th>Punten</th>
-        <th>Verplichte eindvragen</th>
+        <th>Eindvragen opgelost</th>
       </tr>
     </thead>
     <tbody>

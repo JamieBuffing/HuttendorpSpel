@@ -7,7 +7,7 @@
   <% if (error) { %>
     <p class="error"><%= error %></p>
   <% } %>
-
+    <br>
   <form method="post" action="/import" class="formStack">
     <label>ESP32 JSON
       <textarea name="json" id="jsonInput" rows="14" placeholder='[{"postId":"p01","teamId":"04AABBCC","answer":"R"}]'><%= rawJson || '' %></textarea>

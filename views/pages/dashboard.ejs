@@ -1,11 +1,31 @@
 <%- include('../partials/page-shell-start', { title: 'Dashboard' }); %>
 
 <section class="panel">
-  <a class="downloadApp" href="/base/downloads/HuttendorpDeMeentNfcScannerSetup.exe" download>
+  <a id="dlA" class="downloadApp" href="/base/downloads/HuttendorpDeMeentNfcScannerSetup.exe" download>
     Download de NFC Scanner app voor Windows
   </a>
+  <p id="dlB" class="downloadApp">NFC scanner actief.</p>
+
+  <script>
+    fetch("http://127.0.0.1:47832/status")
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          document.getElementById("dlA").style.display = "none";
+          document.getElementById("dlB").style.display = "block";
+        } else {
+          document.getElementById("dlA").style.display = "block";
+          document.getElementById("dlB").style.display = "none";
+        }
+      })
+      .catch(() => {
+        document.getElementById("dlA").style.display = "block";
+        document.getElementById("dlB").style.display = "none";
+      });
+  </script>
+
   <h1>Team dashboard</h1>
-  <p>Scan een teamkaart om de antwoorden op tijdsvolgorde te bekijken.</p>
+  <p>Scan jullie kaart, <br>houdt de kaart 3 seconden boven de scanner.</p>
 
   <form method="get" action="/dashboard" class="gridForm two">
     <label>

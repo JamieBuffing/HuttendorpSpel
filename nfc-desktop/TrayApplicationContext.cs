@@ -9,6 +9,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly NotifyIcon trayIcon;
     private readonly NfcScanner scanner;
+    private readonly LocalStatusServer localStatusServer;
     private readonly List<ScanEntry> scans = new();
     private readonly AppSettings settings;
 
@@ -30,6 +31,14 @@ public sealed class TrayApplicationContext : ApplicationContext
         scanner.StatusChanged += OnStatusChanged;
         scanner.ReaderChanged += OnReaderChanged;
         scanner.CardScanned += OnCardScanned;
+
+        localStatusServer = new LocalStatusServer(() => new LocalStatusSnapshot(
+            status,
+            reader,
+            settings.TypingEnabled,
+            scans.Count
+        ));
+        localStatusServer.Start();
 
         trayIcon = new NotifyIcon
         {
@@ -167,6 +176,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void ExitApp()
     {
         trayIcon.Visible = false;
+        localStatusServer.Dispose();
         scanner.Dispose();
         Application.Exit();
     }
@@ -176,6 +186,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (disposing)
         {
             trayIcon.Dispose();
+            localStatusServer.Dispose();
             scanner.Dispose();
         }
 

@@ -1,6 +1,48 @@
-<a class="button" href="/downloads/HuttendorpDeMeentNfcScannerSetup.exe" download>
+<a id="nfcDownloadButton" class="button" href="/downloads/HuttendorpDeMeentNfcScannerSetup.exe" download>
   Download NFC scanner
 </a>
-<p class="helpText">
+
+<p id="nfcScannerActiveMessage" class="helpText" style="display: none;">
+  Scanner is actief op deze computer.
+</p>
+
+<p id="nfcDownloadHelpText" class="helpText">
   Windows kan bij de eerste keer starten een SmartScreen melding tonen. Klik dan op “Toch uitvoeren”.
 </p>
+
+<script>
+  async function checkHuttendorpNfcScanner() {
+    const downloadButton = document.getElementById('nfcDownloadButton');
+    const activeMessage = document.getElementById('nfcScannerActiveMessage');
+    const helpText = document.getElementById('nfcDownloadHelpText');
+
+    if (!downloadButton || !activeMessage) return;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 900);
+
+    try {
+      const response = await fetch('http://127.0.0.1:47832/status', {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal
+      });
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+      if (data && data.ok === true) {
+        downloadButton.style.display = 'none';
+        activeMessage.style.display = 'block';
+        if (helpText) helpText.style.display = 'none';
+      }
+    } catch (error) {
+      downloadButton.style.display = '';
+      activeMessage.style.display = 'none';
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  checkHuttendorpNfcScanner();
+</script>

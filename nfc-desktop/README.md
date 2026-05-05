@@ -83,3 +83,14 @@ public\downloads\HuttendorpDeMeentNfcScannerSetup.exe
 - De installer downloadt .NET 8 Desktop Runtime automatisch als die ontbreekt.
 - De app zet zichzelf bij eerste start op automatisch opstarten via de instellingen/registry.
 - De installer maakt zelf geen startup-snelkoppeling meer, zodat de instellingenpagina het opstartgedrag echt kan beheren.
+
+
+## Website detectie
+
+De app start lokaal een status endpoint op:
+
+```txt
+http://127.0.0.1:47832/status
+```
+
+De website kan dit endpoint checken. Als de scanner actief is, kan de downloadknop verborgen worden. Gebruik hiervoor `site-snippets/download-button.ejs`.
