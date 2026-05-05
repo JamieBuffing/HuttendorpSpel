@@ -8,7 +8,19 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        ApplicationConfiguration.Initialize();
-        Application.Run(new TrayApplicationContext());
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            Application.Run(new TrayApplicationContext());
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                ex.ToString(),
+                $"{Branding.AppName} - opstartfout",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        }
     }
 }

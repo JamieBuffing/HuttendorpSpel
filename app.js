@@ -77,7 +77,7 @@ modules.forEach((mod) => {
 })
 
 app.get('/api/download-dotnet-runtime', (req, res) => {
-  res.redirect('https://download.visualstudio.microsoft.com/download/pr/placeholder/windowsdesktop-runtime-8.0-win-x64.exe')
+  res.redirect('https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe')
 })
 
 const pageRoutes = require('./server/pages/pages')
