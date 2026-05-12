@@ -146,3 +146,4 @@ logs.json
 node_modules
 nfc-desktop/bin
 nfc-desktop/obj
+nfc-desktop
