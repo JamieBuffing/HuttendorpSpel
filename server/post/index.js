@@ -171,43 +171,104 @@ router.post('/api/esp32/answer', async (req, res, next) => {
 // check-card: kaart scannen en teamnaam ophalen.
 // submit-answer: antwoord R/G/B opslaan voor een post.
 
-router.post('/api/box/check-card', async (req, res, next) => {
-  try {
-    const database = await db()
-    const cardId = String(req.body.cardId || req.body.uid || req.body.teamId || '').trim().toUpperCase()
-    const postId = String(req.body.postId || req.body.id || '').trim()
-    const boxId = String(req.body.boxId || req.body.device || '').trim()
-
-    if (!cardId) {
-      return res.status(400).json({ ok: false, error: 'cardId/uid ontbreekt' })
-    }
-
-    const team = await database.collection('teams').findOne({ cardId, isActive: { $ne: false } })
-
-    if (!team) {
-      return res.status(404).json({
-        ok: false,
-        error: 'Team niet gevonden',
-        cardId,
+router.post(
+  '/api/box/check-card',
+  async (req, res, next) => {
+    try {
+      const database = await db()
+      const cardId = String(
+        req.body.cardId ||
+        req.body.uid ||
+        ''
+      )
+        .trim()
+        .toUpperCase()
+      const postId = String(
+        req.body.postId || ''
+      ).trim()
+      const boxId = String(
+        req.body.boxId || ''
+      ).trim()
+      if (!cardId) {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            error: 'uid ontbreekt'
+          })
+      }
+      const [team, question] =
+        await Promise.all([
+          database
+            .collection('teams')
+            .findOne({
+              cardId,
+              isActive: {
+                $ne: false
+              }
+            }),
+          database
+            .collection('questions')
+            .findOne({
+              postId,
+              type: 'normal',
+              isActive: {
+                $ne: false
+              }
+            })
+        ])
+      if (!team) {
+        return res
+          .status(404)
+          .json({
+            ok: false,
+            error: 'Team niet gevonden'
+          })
+      }
+      if (!question) {
+        return res
+          .status(404)
+          .json({
+            ok: false,
+            error: 'Vraag/post niet gevonden'
+          })
+      }
+      const existingProgress =
+        (team.questionProgress || [])
+          .find(
+            (item) =>
+              item.type === 'normal' &&
+              String(item.questionId) ===
+              String(question._id)
+          )
+      return res.json({
+        ok: true,
+        uid: cardId,
         postId,
-        boxId
+        boxId,
+        teamId: String(team._id),
+        teamName: team.name,
+        alreadyAnswered:
+          Boolean(existingProgress),
+        existingAnswer:
+          existingProgress
+            ?.selectedAnswer ||
+          null,
+        answeredAt:
+          existingProgress
+            ?.answeredAt ||
+          null,
+        totalPoints:
+          Number(
+            team.totalPoints || 0
+          )
       })
     }
-
-    return res.json({
-      ok: true,
-      cardId,
-      uid: cardId,
-      postId,
-      boxId,
-      teamId: String(team._id),
-      teamName: team.name,
-      totalPoints: Number(team.totalPoints || 0)
-    })
-  } catch (error) {
-    next(error)
+    catch (error) {
+      next(error)
+    }
   }
-})
+)
 
 router.post('/api/box/submit-answer', async (req, res, next) => {
   try {
