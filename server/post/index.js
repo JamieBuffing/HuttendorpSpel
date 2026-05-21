@@ -162,6 +162,110 @@ router.post('/api/esp32/answer', async (req, res, next) => {
 })
 
 
+
+
+// =======================
+// ESP32 BOX API
+// =======================
+// Deze endpoints zijn bedoeld voor de ESP32 boxen.
+// check-card: kaart scannen en teamnaam ophalen.
+// submit-answer: antwoord R/G/B opslaan voor een post.
+
+router.post('/api/box/check-card', async (req, res, next) => {
+  try {
+    const database = await db()
+    const cardId = String(req.body.cardId || req.body.uid || req.body.teamId || '').trim().toUpperCase()
+    const postId = String(req.body.postId || req.body.id || '').trim()
+    const boxId = String(req.body.boxId || req.body.device || '').trim()
+
+    if (!cardId) {
+      return res.status(400).json({ ok: false, error: 'cardId/uid ontbreekt' })
+    }
+
+    const team = await database.collection('teams').findOne({ cardId, isActive: { $ne: false } })
+
+    if (!team) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Team niet gevonden',
+        cardId,
+        postId,
+        boxId
+      })
+    }
+
+    return res.json({
+      ok: true,
+      cardId,
+      uid: cardId,
+      postId,
+      boxId,
+      teamId: String(team._id),
+      teamName: team.name,
+      totalPoints: Number(team.totalPoints || 0)
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/api/box/submit-answer', async (req, res, next) => {
+  try {
+    const postId = String(req.body.postId || req.body.id || '').trim()
+    const cardId = String(req.body.cardId || req.body.uid || req.body.teamId || '').trim().toUpperCase()
+    const answer = String(req.body.answer || req.body.choice || '').trim().toUpperCase()
+    const boxId = String(req.body.boxId || req.body.device || '').trim()
+
+    const result = await saveAnswerFromEsp({
+      postId,
+      cardId,
+      teamId: cardId,
+      answer
+    })
+
+    if (!result.ok) {
+      const status = ['Team niet gevonden', 'Vraag/post niet gevonden'].includes(result.error) ? 404 : 400
+      return res.status(status).json({
+        ...result,
+        ok: false,
+        boxId,
+        uid: cardId,
+        message: result.error || 'Opslaan mislukt'
+      })
+    }
+
+    return res.json({
+      ...result,
+      ok: true,
+      boxId,
+      uid: cardId,
+      message: 'Antwoord opgeslagen'
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/api/box/status', async (req, res, next) => {
+  try {
+    const database = await db()
+    const [teamCount, questionCount] = await Promise.all([
+      database.collection('teams').countDocuments({ isActive: { $ne: false } }),
+      database.collection('questions').countDocuments({ type: 'normal', isActive: { $ne: false } })
+    ])
+
+    res.json({
+      ok: true,
+      teamCount,
+      questionCount,
+      serverTime: new Date().toISOString()
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+
 router.post('/api/nfc/scan', (req, res) => {
   const expectedToken = String(process.env.NFC_BRIDGE_TOKEN || '').trim()
   const providedToken = String(req.headers['x-nfc-token'] || req.body.token || '').trim()
