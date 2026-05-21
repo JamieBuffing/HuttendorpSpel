@@ -1,9 +1,5 @@
-const EventEmitter = require('events')
-
-class NfcService extends EventEmitter {
-  start() {
-    console.log('[NFC] Lokale NFC service uitgeschakeld/niet aanwezig.')
-  }
+const {EventEmitter}=require('events');
+class NFCService extends EventEmitter{
+ start(){console.log('NFC service stub gestart')}
 }
-
-module.exports = new NfcService()
+module.exports=new NFCService();

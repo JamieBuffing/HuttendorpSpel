@@ -1,220 +1,237 @@
-<%- include('../partials/page-shell-start', { title: 'Backup import scanner' }); %>
+<%- include('../partials/page-shell-start', { title: 'Backup scanner' }); %>
 
 <section class="panel">
-  <h1>Backup import scanner</h1>
-  <p>Scan hier de 6-regel backup-code van het OLED-scherm. Houd het kader van de OLED-code zo recht mogelijk in beeld.</p>
+  <h1>Backup scanner</h1>
+  <p>Scan hier de backup-code van het OLED-scherm van een postbox. De oude JSON-import is hiermee vervangen.</p>
 
   <% if (error) { %>
     <p class="error"><%= error %></p>
   <% } %>
 
-  <div class="scannerLayout">
-    <video id="backupVideo" autoplay playsinline muted style="width:100%;max-width:520px;border-radius:16px;background:#000;"></video>
-    <canvas id="backupCanvas" width="640" height="360" style="display:none;"></canvas>
-
-    <div class="formStack" style="margin-top:16px;">
-      <button class="button" type="button" id="startCameraBtn">Camera starten</button>
-      <button class="button" type="button" id="scanFrameBtn">Scan beeld</button>
-      <button class="button secondary" type="button" id="stopCameraBtn">Camera stoppen</button>
+  <div class="backupScanner">
+    <div class="scannerVideoWrap">
+      <video id="backupVideo" playsinline muted></video>
+      <div class="scannerOverlay">
+        <div class="scannerFrame"></div>
+      </div>
+      <canvas id="scanCanvas" width="128" height="64" hidden></canvas>
     </div>
 
-    <p class="helpText" id="scanStatus">Nog niet gescand.</p>
+    <div class="scannerControls">
+      <button class="button" type="button" id="startCameraBtn">Camera starten</button>
+      <button class="button secondary" type="button" id="scanOnceBtn" disabled>Scan nu</button>
+      <button class="button secondary" type="button" id="stopCameraBtn" disabled>Camera stoppen</button>
+    </div>
+
+    <p class="helpText">
+      Houd de witte rand van de OLED-code precies binnen het kader. Zorg dat het scherm helder, recht en scherp in beeld is.
+    </p>
+
+    <div id="scanMessage" class="scannerMessage">Nog niet gescand.</div>
+
+    <details class="manualFallback">
+      <summary>Handmatig testen met 6 bitregels</summary>
+      <form method="post" action="/import" class="formStack">
+        <label>6 regels van 16 bits
+          <textarea name="rows" rows="7" placeholder="1110000000011101&#10;0000010000101010&#10;0001011010111010&#10;1111110000100000&#10;1001000100000000&#10;0000000000000000"></textarea>
+        </label>
+        <button class="button" type="submit">Handmatig importeren</button>
+      </form>
+    </details>
   </div>
 </section>
 
-<section class="panel">
-  <h2>Handmatig testen</h2>
-  <p class="helpText">Plak hier eventueel de uitgelezen code, bijvoorbeeld <code>P01R042A16BAFC2091D00000</code>.</p>
-
-  <form method="post" action="/import" class="formStack">
-    <label>Backup-code
-      <input name="code" id="manualCode" placeholder="P01R042A16BAFC2091D00000" autocomplete="off">
-    </label>
-    <button class="button" type="submit">Code importeren</button>
-  </form>
-</section>
-
-<% if (decoded || result) { %>
+<% if (result) { %>
   <section class="panel">
     <h2>Import resultaat</h2>
-    <% if (decoded) { %>
-      <p>Post: <strong><%= decoded.postId %></strong></p>
-      <p>UID: <strong><%= decoded.uid %></strong></p>
-      <p>Antwoord: <strong><%= decoded.answer %></strong></p>
-    <% } %>
-
-    <% if (result) { %>
-      <p>Status: <strong><%= result.ok ? 'Opgeslagen' : (result.alreadyAnswered ? 'Al gedaan' : 'Niet opgeslagen') %></strong></p>
-      <p>Team: <strong><%= result.teamName || result.teamId || '-' %></strong></p>
-      <p>Melding: <strong><%= result.questionTitle || result.error || '-' %></strong></p>
-    <% } %>
+    <table class="dataTable">
+      <tbody>
+        <tr><th>Post</th><td><%= result.decoded.postId %></td></tr>
+        <tr><th>UID</th><td><%= result.decoded.uid %></td></tr>
+        <tr><th>Antwoord</th><td><%= result.decoded.answer %></td></tr>
+        <tr><th>Status</th><td><%= result.result.ok ? 'Opgeslagen' : (result.result.alreadyAnswered ? 'Al gedaan' : 'Niet opgeslagen') %></td></tr>
+        <tr><th>Melding</th><td><%= result.result.questionTitle || result.result.error || '-' %></td></tr>
+      </tbody>
+    </table>
   </section>
 <% } %>
 
+<style>
+  .backupScanner { display: grid; gap: 1rem; }
+  .scannerVideoWrap { position: relative; width: min(100%, 720px); margin: 0 auto; background: #050505; border-radius: 16px; overflow: hidden; aspect-ratio: 2 / 1; }
+  #backupVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scannerOverlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+  .scannerFrame { width: 82%; aspect-ratio: 2 / 1; border: 3px solid #00ff88; border-radius: 8px; box-shadow: 0 0 0 999px rgba(0,0,0,.28); }
+  .scannerControls { display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center; }
+  .scannerMessage { padding: .9rem 1rem; border-radius: 12px; background: #111; color: #fff; text-align: center; font-weight: 700; }
+  .scannerMessage.ok { background: #063; }
+  .scannerMessage.error { background: #700; }
+  .scannerMessage.busy { background: #665000; }
+  .manualFallback { margin-top: .5rem; }
+</style>
+
 <script>
+(() => {
   const video = document.getElementById('backupVideo')
-  const canvas = document.getElementById('backupCanvas')
-  const statusEl = document.getElementById('scanStatus')
-  const manualCode = document.getElementById('manualCode')
+  const canvas = document.getElementById('scanCanvas')
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
   const startBtn = document.getElementById('startCameraBtn')
-  const scanBtn = document.getElementById('scanFrameBtn')
+  const scanBtn = document.getElementById('scanOnceBtn')
   const stopBtn = document.getElementById('stopCameraBtn')
+  const message = document.getElementById('scanMessage')
 
   let stream = null
+  let scanTimer = null
+  let lastRows = ''
+  let lastSubmitAt = 0
 
-  function valueToChar(value, position) {
-    if (position === 0 && value === 14) return 'P'
-    if (position === 3) {
-      if (value === 13) return 'R'
-      if (value === 12) return 'G'
-      if (value === 11) return 'B'
-    }
-    if (value >= 0 && value <= 9) return String(value)
-    return String.fromCharCode('A'.charCodeAt(0) + value - 10)
-  }
-
-  function decodeBitsToCode(bits) {
-    let code = ''
-    let position = 0
-
-    for (let row = 0; row < 6; row++) {
-      for (let group = 0; group < 4; group++) {
-        let value = 0
-        for (let bit = 0; bit < 4; bit++) {
-          const index = row * 16 + group * 4 + bit
-          value = (value << 1) + (bits[index] ? 1 : 0)
-        }
-        code += valueToChar(value, position)
-        position++
-      }
-    }
-
-    return code
-  }
-
-  function readCodeFromCanvas() {
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    const width = canvas.width
-    const height = canvas.height
-    const image = ctx.getImageData(0, 0, width, height)
-    const data = image.data
-
-    let minX = width, minY = height, maxX = 0, maxY = 0
-
-    for (let y = 0; y < height; y += 2) {
-      for (let x = 0; x < width; x += 2) {
-        const i = (y * width + x) * 4
-        const r = data[i]
-        const g = data[i + 1]
-        const b = data[i + 2]
-        const bright = r + g + b
-
-        if (bright > 540) {
-          if (x < minX) minX = x
-          if (y < minY) minY = y
-          if (x > maxX) maxX = x
-          if (y > maxY) maxY = y
-        }
-      }
-    }
-
-    if (maxX <= minX || maxY <= minY || (maxX - minX) < 80 || (maxY - minY) < 40) {
-      throw new Error('Geen duidelijk wit kader gevonden')
-    }
-
-    const boxW = maxX - minX
-    const boxH = maxY - minY
-    const bits = []
-
-    for (let row = 0; row < 6; row++) {
-      const y = Math.round(minY + boxH * ((3 + row * 9 + 3.5) / 64))
-      for (let bit = 0; bit < 16; bit++) {
-        const x = Math.round(minX + boxW * ((6 + bit * 3 + 1.5) / 128))
-        let brightCount = 0
-        let total = 0
-
-        for (let dy = -2; dy <= 2; dy++) {
-          for (let dx = -2; dx <= 2; dx++) {
-            const sx = Math.max(0, Math.min(width - 1, x + dx))
-            const sy = Math.max(0, Math.min(height - 1, y + dy))
-            const i = (sy * width + sx) * 4
-            const bright = data[i] + data[i + 1] + data[i + 2]
-            if (bright > 540) brightCount++
-            total++
-          }
-        }
-
-        bits.push(brightCount > total * 0.35)
-      }
-    }
-
-    return decodeBitsToCode(bits)
-  }
-
-  async function startCamera() {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } },
-      audio: false
-    })
-    video.srcObject = stream
-    statusEl.textContent = 'Camera gestart. Richt op de OLED-code en klik op Scan beeld.'
+  function setMessage(text, type = '') {
+    message.textContent = text
+    message.className = 'scannerMessage ' + type
   }
 
   function stopCamera() {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop())
-      stream = null
-    }
+    if (scanTimer) window.clearInterval(scanTimer)
+    scanTimer = null
+    if (stream) stream.getTracks().forEach((track) => track.stop())
+    stream = null
     video.srcObject = null
-    statusEl.textContent = 'Camera gestopt.'
+    scanBtn.disabled = true
+    stopBtn.disabled = true
+    startBtn.disabled = false
   }
 
-  async function submitCode(code) {
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      })
+      video.srcObject = stream
+      await video.play()
+      scanBtn.disabled = false
+      stopBtn.disabled = false
+      startBtn.disabled = true
+      setMessage('Camera gestart. Richt het kader op de OLED-code.', 'busy')
+      scanTimer = window.setInterval(scanAndMaybeSubmit, 700)
+    } catch (error) {
+      setMessage('Camera kon niet starten: ' + (error.message || error), 'error')
+    }
+  }
+
+  function getCenterCrop(videoWidth, videoHeight) {
+    const targetRatio = 2
+    let cropWidth = videoWidth
+    let cropHeight = Math.round(cropWidth / targetRatio)
+
+    if (cropHeight > videoHeight) {
+      cropHeight = videoHeight
+      cropWidth = Math.round(cropHeight * targetRatio)
+    }
+
+    return {
+      x: Math.floor((videoWidth - cropWidth) / 2),
+      y: Math.floor((videoHeight - cropHeight) / 2),
+      width: cropWidth,
+      height: cropHeight
+    }
+  }
+
+  function readRowsFromFrame() {
+    if (!video.videoWidth || !video.videoHeight) return null
+
+    const crop = getCenterCrop(video.videoWidth, video.videoHeight)
+    ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, 128, 64)
+
+    const image = ctx.getImageData(0, 0, 128, 64)
+    const data = image.data
+    const brightness = []
+
+    for (let y = 0; y < 64; y++) {
+      brightness[y] = []
+      for (let x = 0; x < 128; x++) {
+        const i = (y * 128 + x) * 4
+        brightness[y][x] = (data[i] + data[i + 1] + data[i + 2]) / 3
+      }
+    }
+
+    // Dynamische drempel: OLED-wit moet duidelijk boven de achtergrond zitten.
+    const samples = []
+    for (let y = 0; y < 64; y += 2) {
+      for (let x = 0; x < 128; x += 2) samples.push(brightness[y][x])
+    }
+    samples.sort((a, b) => a - b)
+    const low = samples[Math.floor(samples.length * 0.20)] || 0
+    const high = samples[Math.floor(samples.length * 0.92)] || 255
+    const threshold = Math.max(35, (low + high) / 2)
+
+    const rows = []
+    for (let row = 0; row < 6; row++) {
+      const bits = []
+      const yStart = 3 + row * 9
+      for (let bit = 0; bit < 16; bit++) {
+        const xStart = 6 + bit * 3
+        let total = 0
+        let white = 0
+        for (let yy = yStart; yy < yStart + 7; yy++) {
+          for (let xx = xStart; xx < xStart + 3; xx++) {
+            total++
+            if (brightness[yy]?.[xx] > threshold) white++
+          }
+        }
+        bits.push(white / total > 0.32 ? '1' : '0')
+      }
+      rows.push(bits.join(''))
+    }
+
+    return rows
+  }
+
+  async function submitRows(rows) {
+    const key = rows.join('|')
+    if (key === lastRows && Date.now() - lastSubmitAt < 4500) return
+
+    lastRows = key
+    lastSubmitAt = Date.now()
+    setMessage('Code gelezen, importeren...', 'busy')
+
     const response = await fetch('/import/scan-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code })
+      body: JSON.stringify({ rows })
     })
 
     const result = await response.json()
 
     if (!response.ok || !result.ok) {
-      throw new Error(result.error || result.result?.error || 'Import mislukt')
-    }
-
-    return result
-  }
-
-  async function scanFrame() {
-    if (!video.videoWidth) {
-      statusEl.textContent = 'Camera is nog niet klaar.'
+      setMessage(result.error || result.result?.error || 'Import mislukt. Probeer opnieuw.', 'error')
       return
     }
 
-    const ctx = canvas.getContext('2d')
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const decoded = result.decoded
+    const status = result.alreadyAnswered ? 'al gedaan' : 'opgeslagen'
+    setMessage(`Gelukt: ${decoded.postId} / ${decoded.uid} / ${decoded.answer} (${status})`, 'ok')
+  }
 
+  async function scanAndMaybeSubmit() {
     try {
-      const code = readCodeFromCanvas()
-      manualCode.value = code
-      statusEl.textContent = `Code gelezen: ${code}. Importeren...`
-      const result = await submitCode(code)
-      const team = result.result?.teamName || result.result?.teamId || result.decoded?.uid || '-'
-      const state = result.alreadyAnswered ? 'al gedaan' : 'opgeslagen'
-      statusEl.textContent = `Gelukt: ${state} voor ${team}. Antwoord: ${result.decoded.answer}`
+      const rows = readRowsFromFrame()
+      if (!rows) return
+      await submitRows(rows)
     } catch (error) {
-      statusEl.textContent = `Niet gelukt: ${error.message}`
+      setMessage(error.message || 'Nog geen geldige code gelezen.', 'error')
     }
   }
 
-  startBtn.addEventListener('click', () => startCamera().catch((error) => {
-    statusEl.textContent = `Camera fout: ${error.message}`
-  }))
-
-  scanBtn.addEventListener('click', scanFrame)
+  startBtn.addEventListener('click', startCamera)
+  scanBtn.addEventListener('click', scanAndMaybeSubmit)
   stopBtn.addEventListener('click', stopCamera)
+  window.addEventListener('pagehide', stopCamera)
+})()
 </script>
 
 <%- include('../partials/page-shell-end'); %>

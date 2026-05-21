@@ -13,88 +13,56 @@ const {
 
 const router = express.Router()
 
-function parseBackupJson(raw) {
-  const value = String(raw || '').trim()
-  if (!value) return []
-
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed : [parsed]
-  } catch (error) {
-    return value
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => JSON.parse(line))
-  }
+function nibbleToHex(value) {
+  const clean = Number(value || 0) & 15
+  return clean < 10 ? String(clean) : String.fromCharCode(55 + clean)
 }
 
-function calculateBackupChecksum(data) {
-  const total = String(data || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)
-  const value = total % 16
-  return value < 10 ? String(value) : String.fromCharCode('A'.charCodeAt(0) + value - 10)
+function checksumHex(data) {
+  const total = String(data || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) % 16
+  return nibbleToHex(total)
 }
 
-function normalizeDecodedPostId(value) {
-  const clean = String(value || '').toUpperCase()
-  const match = clean.match(/^P(\d{2})/)
-  if (match) return `p${match[1]}`
-  return clean.toLowerCase()
+function bitsToNibble(bits) {
+  return String(bits || '').split('').reduce((value, bit) => (value << 1) + (bit === '1' ? 1 : 0), 0) & 15
 }
 
-function decodeBackupCode(rawCode) {
-  const code = String(rawCode || '').trim().toUpperCase().replace(/[^0-9A-FPBRG]/g, '')
-
-  if (code.length < 6) {
-    return { ok: false, error: 'Code te kort' }
+function decodeBackupRows(rows) {
+  if (!Array.isArray(rows) || rows.length !== 6) {
+    throw new Error('Er zijn exact 6 coderegels nodig.')
   }
 
-  if (code[0] !== 'P') {
-    return { ok: false, error: 'Code moet met P beginnen' }
-  }
+  const nibbles = []
+  for (const row of rows) {
+    const cleanRow = String(row || '').replace(/[^01]/g, '')
+    if (cleanRow.length !== 16) {
+      throw new Error('Elke coderegel moet 16 bits bevatten.')
+    }
 
-  const postPart = code.slice(0, 3)
-  const answer = code[3]
-
-  if (!['R', 'G', 'B'].includes(answer)) {
-    return { ok: false, error: 'Ongeldig antwoord in code' }
-  }
-
-  // Zoek de checksumpositie. De Arduino vult na de checksum aan met nullen tot 24 tekens.
-  for (let checksumIndex = 5; checksumIndex < code.length; checksumIndex++) {
-    const payload = code.slice(0, checksumIndex)
-    const checksum = code[checksumIndex]
-    const rest = code.slice(checksumIndex + 1)
-
-    if (rest && !/^0*$/.test(rest)) continue
-    if (calculateBackupChecksum(payload) !== checksum) continue
-
-    const uid = code.slice(4, checksumIndex)
-    if (!uid) continue
-
-    return {
-      ok: true,
-      postId: normalizeDecodedPostId(postPart),
-      uid,
-      answer,
-      checksum
+    for (let i = 0; i < 16; i += 4) {
+      nibbles.push(bitsToNibble(cleanRow.slice(i, i + 4)))
     }
   }
 
-  // Fallback voor bekende UID-lengte van NTAG kaarten: 14 hex tekens.
-  const payload = code.slice(0, 18)
-  const checksum = code[18]
-  if (payload.length === 18 && checksum && calculateBackupChecksum(payload) === checksum) {
-    return {
-      ok: true,
-      postId: normalizeDecodedPostId(postPart),
-      uid: code.slice(4, 18),
-      answer,
-      checksum
-    }
+  // Arduino payload-indeling:
+  // positie 0: P, 1-2: postnummer, 3: antwoord, 4-17: UID, 18: checksum, 19-23: padding
+  const postId = `p${nibbleToHex(nibbles[1])}${nibbleToHex(nibbles[2])}`.toLowerCase()
+  const answerMap = { 13: 'R', 12: 'G', 11: 'B' }
+  const answer = answerMap[nibbles[3]]
+
+  if (!answer) {
+    throw new Error('Antwoord kon niet worden gelezen.')
   }
 
-  return { ok: false, error: 'Checksum klopt niet of code is onvolledig' }
+  const uid = nibbles.slice(4, 18).map(nibbleToHex).join('').toUpperCase()
+  const checksum = nibbleToHex(nibbles[18])
+  const expectedChecksum = checksumHex(`P${postId.slice(1).toUpperCase()}${answer}${uid}`)
+
+  if (checksum !== expectedChecksum) {
+    throw new Error(`Checksum klopt niet. Gelezen: ${checksum}, verwacht: ${expectedChecksum}.`)
+  }
+
+  return { postId, uid, answer, checksum }
 }
 
 router.get('/', (req, res) => res.redirect('/dashboard'))
@@ -168,63 +136,65 @@ router.get('/leiding-overzicht', requireLogin, async (req, res, next) => {
 
 router.get('/import', requireLogin, (req, res) => {
   res.render('pages/import', {
-    decoded: null,
     result: null,
     error: null
   })
 })
 
-router.post('/import/scan-code', requireLogin, async (req, res, next) => {
+router.post('/import/scan-code', requireLogin, async (req, res) => {
   try {
-    const decoded = decodeBackupCode(req.body.code)
-
-    if (!decoded.ok) {
-      return res.status(400).json(decoded)
-    }
-
+    const decoded = decodeBackupRows(req.body.rows)
     const result = await saveAnswerFromEsp({
       postId: decoded.postId,
-      cardId: decoded.uid,
       teamId: decoded.uid,
+      cardId: decoded.uid,
       answer: decoded.answer,
       allowOverwrite: false
     })
 
-    if (!result.ok && !result.alreadyAnswered) {
-      return res.status(400).json({ ok: false, decoded, result, error: result.error || 'Import mislukt' })
-    }
-
-    res.json({ ok: true, decoded, result, alreadyAnswered: Boolean(result.alreadyAnswered) })
+    res.status(result.ok || result.alreadyAnswered ? 200 : 400).json({
+      ok: Boolean(result.ok || result.alreadyAnswered),
+      decoded,
+      result,
+      alreadyAnswered: Boolean(result.alreadyAnswered)
+    })
   } catch (error) {
-    next(error)
+    res.status(400).json({
+      ok: false,
+      error: error.message || 'Backup-code kon niet worden gelezen.'
+    })
   }
 })
 
 router.post('/import', requireLogin, async (req, res) => {
-  const rawCode = String(req.body.code || '')
-  const decoded = decodeBackupCode(rawCode)
+  try {
+    let rows = req.body.rows
+    if (typeof rows === 'string') {
+      rows = rows
+        .split('\n')
+        .map((row) => row.trim())
+        .filter(Boolean)
+    }
 
-  if (!decoded.ok) {
-    return res.status(400).render('pages/import', {
-      decoded: null,
+    const decoded = decodeBackupRows(rows)
+    const result = await saveAnswerFromEsp({
+      postId: decoded.postId,
+      teamId: decoded.uid,
+      cardId: decoded.uid,
+      answer: decoded.answer,
+      allowOverwrite: false
+    })
+
+    res.render('pages/import', {
+      result: { decoded, result },
+      error: null
+    })
+  } catch (error) {
+    res.status(400).render('pages/import', {
       result: null,
-      error: decoded.error || 'Ongeldige backup-code.'
+      error: error.message || 'Backup-code kon niet worden gelezen.'
     })
   }
-
-  const result = await saveAnswerFromEsp({
-    postId: decoded.postId,
-    cardId: decoded.uid,
-    teamId: decoded.uid,
-    answer: decoded.answer,
-    allowOverwrite: false
-  })
-
-  res.render('pages/import', {
-    decoded,
-    result,
-    error: result.ok || result.alreadyAnswered ? null : (result.error || 'Import mislukt')
-  })
 })
 
 router.get('/setup', requireLogin, async (req, res, next) => {
