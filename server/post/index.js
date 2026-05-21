@@ -141,6 +141,70 @@ router.post('/questions/:id/delete', requireLogin, async (req, res, next) => {
   }
 })
 
+
+router.post('/api/box/check-card', async (req, res, next) => {
+  try {
+    const database = await db()
+
+    const postId = String(req.body.postId || '').trim()
+    const uid = String(req.body.uid || req.body.cardId || req.body.teamId || '').trim().toUpperCase()
+
+    if (!postId) return res.status(400).json({ ok: false, error: 'postId ontbreekt' })
+    if (!uid) return res.status(400).json({ ok: false, error: 'uid/cardId ontbreekt' })
+
+    const [team, question] = await Promise.all([
+      database.collection('teams').findOne({ cardId: uid, isActive: { $ne: false } }),
+      database.collection('questions').findOne({ postId, type: 'normal', isActive: { $ne: false } })
+    ])
+
+    if (!team) return res.status(404).json({ ok: false, error: 'Team niet gevonden', uid, postId })
+    if (!question) return res.status(404).json({ ok: false, error: 'Vraag/post niet gevonden', uid, postId, teamName: team.name })
+
+    const existingProgress = (team.questionProgress || []).find((item) => {
+      return item.type === 'normal' && String(item.questionId) === String(question._id)
+    })
+
+    res.json({
+      ok: true,
+      uid,
+      postId,
+      teamId: String(team._id),
+      teamName: team.name,
+      questionTitle: question.title,
+      alreadyAnswered: Boolean(existingProgress),
+      existingAnswer: existingProgress?.selectedAnswer || null,
+      answeredAt: existingProgress?.answeredAt || null
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/api/box/submit-answer', async (req, res, next) => {
+  try {
+    const result = await saveAnswerFromEsp({
+      postId: req.body.postId,
+      cardId: req.body.uid || req.body.cardId || req.body.teamId,
+      teamId: req.body.teamId || req.body.cardId || req.body.uid,
+      answer: req.body.answer,
+      allowOverwrite: false
+    })
+
+    if (!result.ok) {
+      const status = result.alreadyAnswered ? 409 : (['Team niet gevonden', 'Vraag/post niet gevonden'].includes(result.error) ? 404 : 400)
+      return res.status(status).json(result)
+    }
+
+    res.json(result)
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/api/box/status', async (req, res) => {
+  res.json({ ok: true, service: 'box-api', time: new Date().toISOString() })
+})
+
 router.post('/api/esp32/answer', async (req, res, next) => {
   try {
     const result = await saveAnswerFromEsp({
@@ -156,171 +220,6 @@ router.post('/api/esp32/answer', async (req, res, next) => {
     }
 
     res.json(result)
-  } catch (error) {
-    next(error)
-  }
-})
-
-
-
-
-// =======================
-// ESP32 BOX API
-// =======================
-// Deze endpoints zijn bedoeld voor de ESP32 boxen.
-// check-card: kaart scannen en teamnaam ophalen.
-// submit-answer: antwoord R/G/B opslaan voor een post.
-
-router.post(
-  '/api/box/check-card',
-  async (req, res, next) => {
-    try {
-      const database = await db()
-      const cardId = String(
-        req.body.cardId ||
-        req.body.uid ||
-        ''
-      )
-        .trim()
-        .toUpperCase()
-      const postId = String(
-        req.body.postId || ''
-      ).trim()
-      const boxId = String(
-        req.body.boxId || ''
-      ).trim()
-      if (!cardId) {
-        return res
-          .status(400)
-          .json({
-            ok: false,
-            error: 'uid ontbreekt'
-          })
-      }
-      const [team, question] =
-        await Promise.all([
-          database
-            .collection('teams')
-            .findOne({
-              cardId,
-              isActive: {
-                $ne: false
-              }
-            }),
-          database
-            .collection('questions')
-            .findOne({
-              postId,
-              type: 'normal',
-              isActive: {
-                $ne: false
-              }
-            })
-        ])
-      if (!team) {
-        return res
-          .status(404)
-          .json({
-            ok: false,
-            error: 'Team niet gevonden'
-          })
-      }
-      if (!question) {
-        return res
-          .status(404)
-          .json({
-            ok: false,
-            error: 'Vraag/post niet gevonden'
-          })
-      }
-      const existingProgress =
-        (team.questionProgress || [])
-          .find(
-            (item) =>
-              item.type === 'normal' &&
-              String(item.questionId) ===
-              String(question._id)
-          )
-      return res.json({
-        ok: true,
-        uid: cardId,
-        postId,
-        boxId,
-        teamId: String(team._id),
-        teamName: team.name,
-        alreadyAnswered:
-          Boolean(existingProgress),
-        existingAnswer:
-          existingProgress
-            ?.selectedAnswer ||
-          null,
-        answeredAt:
-          existingProgress
-            ?.answeredAt ||
-          null,
-        totalPoints:
-          Number(
-            team.totalPoints || 0
-          )
-      })
-    }
-    catch (error) {
-      next(error)
-    }
-  }
-)
-
-router.post('/api/box/submit-answer', async (req, res, next) => {
-  try {
-    const postId = String(req.body.postId || req.body.id || '').trim()
-    const cardId = String(req.body.cardId || req.body.uid || req.body.teamId || '').trim().toUpperCase()
-    const answer = String(req.body.answer || req.body.choice || '').trim().toUpperCase()
-    const boxId = String(req.body.boxId || req.body.device || '').trim()
-
-    const result = await saveAnswerFromEsp({
-      postId,
-      cardId,
-      teamId: cardId,
-      answer
-    })
-
-    if (!result.ok) {
-      const status = ['Team niet gevonden', 'Vraag/post niet gevonden'].includes(result.error) ? 404 : 400
-      return res.status(status).json({
-        ...result,
-        ok: false,
-        boxId,
-        uid: cardId,
-        message: result.error || 'Opslaan mislukt'
-      })
-    }
-
-    return res.json({
-      ...result,
-      ok: true,
-      boxId,
-      uid: cardId,
-      message: 'Antwoord opgeslagen'
-    })
-  } catch (error) {
-    next(error)
-  }
-})
-
-router.get('/api/box/status', async (req, res, next) => {
-  try {
-    const database = await db()
-    const [teamCount, questionCount] = await Promise.all([
-      database.collection('teams').countDocuments({ isActive: { $ne: false } }),
-      database.collection('questions').countDocuments({ type: 'normal', isActive: { $ne: false } })
-    ])
-
-    res.json({
-      ok: true,
-      teamCount,
-      questionCount,
-      serverTime: new Date().toISOString()
-    })
   } catch (error) {
     next(error)
   }

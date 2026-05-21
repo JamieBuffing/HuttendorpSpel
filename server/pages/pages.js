@@ -13,20 +13,56 @@ const {
 
 const router = express.Router()
 
-function parseBackupJson(raw) {
-  const value = String(raw || '').trim()
-  if (!value) return []
+function nibbleToHex(value) {
+  const clean = Number(value || 0) & 15
+  return clean < 10 ? String(clean) : String.fromCharCode(55 + clean)
+}
 
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed : [parsed]
-  } catch (error) {
-    return value
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => JSON.parse(line))
+function checksumHex(data) {
+  const total = String(data || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) % 16
+  return nibbleToHex(total)
+}
+
+function bitsToNibble(bits) {
+  return String(bits || '').split('').reduce((value, bit) => (value << 1) + (bit === '1' ? 1 : 0), 0) & 15
+}
+
+function decodeBackupRows(rows) {
+  if (!Array.isArray(rows) || rows.length !== 6) {
+    throw new Error('Er zijn exact 6 coderegels nodig.')
   }
+
+  const nibbles = []
+  for (const row of rows) {
+    const cleanRow = String(row || '').replace(/[^01]/g, '')
+    if (cleanRow.length !== 16) {
+      throw new Error('Elke coderegel moet 16 bits bevatten.')
+    }
+
+    for (let i = 0; i < 16; i += 4) {
+      nibbles.push(bitsToNibble(cleanRow.slice(i, i + 4)))
+    }
+  }
+
+  // Arduino payload-indeling:
+  // positie 0: P, 1-2: postnummer, 3: antwoord, 4-17: UID, 18: checksum, 19-23: padding
+  const postId = `p${nibbleToHex(nibbles[1])}${nibbleToHex(nibbles[2])}`.toLowerCase()
+  const answerMap = { 13: 'R', 12: 'G', 11: 'B' }
+  const answer = answerMap[nibbles[3]]
+
+  if (!answer) {
+    throw new Error('Antwoord kon niet worden gelezen.')
+  }
+
+  const uid = nibbles.slice(4, 18).map(nibbleToHex).join('').toUpperCase()
+  const checksum = nibbleToHex(nibbles[18])
+  const expectedChecksum = checksumHex(`P${postId.slice(1).toUpperCase()}${answer}${uid}`)
+
+  if (checksum !== expectedChecksum) {
+    throw new Error(`Checksum klopt niet. Gelezen: ${checksum}, verwacht: ${expectedChecksum}.`)
+  }
+
+  return { postId, uid, answer, checksum }
 }
 
 router.get('/', (req, res) => res.redirect('/dashboard'))
@@ -100,41 +136,63 @@ router.get('/leiding-overzicht', requireLogin, async (req, res, next) => {
 
 router.get('/import', requireLogin, (req, res) => {
   res.render('pages/import', {
-    rawJson: '',
-    parsedCount: 0,
-    results: [],
+    result: null,
     error: null
   })
 })
 
-router.post('/import', requireLogin, async (req, res) => {
-  const rawJson = String(req.body.json || '')
-
+router.post('/import/scan-code', requireLogin, async (req, res) => {
   try {
-    const objects = parseBackupJson(rawJson)
-    const results = []
+    const decoded = decodeBackupRows(req.body.rows)
+    const result = await saveAnswerFromEsp({
+      postId: decoded.postId,
+      teamId: decoded.uid,
+      cardId: decoded.uid,
+      answer: decoded.answer,
+      allowOverwrite: false
+    })
 
-    for (const item of objects) {
-      results.push(await saveAnswerFromEsp({
-        postId: item.postId || item.id,
-        teamId: item.teamId || item.cardId,
-        cardId: item.cardId || item.teamId,
-        answer: item.answer
-      }))
+    res.status(result.ok || result.alreadyAnswered ? 200 : 400).json({
+      ok: Boolean(result.ok || result.alreadyAnswered),
+      decoded,
+      result,
+      alreadyAnswered: Boolean(result.alreadyAnswered)
+    })
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      error: error.message || 'Backup-code kon niet worden gelezen.'
+    })
+  }
+})
+
+router.post('/import', requireLogin, async (req, res) => {
+  try {
+    let rows = req.body.rows
+    if (typeof rows === 'string') {
+      rows = rows
+        .split('\n')
+        .map((row) => row.trim())
+        .filter(Boolean)
     }
 
+    const decoded = decodeBackupRows(rows)
+    const result = await saveAnswerFromEsp({
+      postId: decoded.postId,
+      teamId: decoded.uid,
+      cardId: decoded.uid,
+      answer: decoded.answer,
+      allowOverwrite: false
+    })
+
     res.render('pages/import', {
-      rawJson,
-      parsedCount: objects.length,
-      results,
+      result: { decoded, result },
       error: null
     })
   } catch (error) {
     res.status(400).render('pages/import', {
-      rawJson,
-      parsedCount: 0,
-      results: [],
-      error: 'Ongeldige JSON. Plak een JSON-array, één JSON-object, of meerdere JSON-objecten onder elkaar.'
+      result: null,
+      error: error.message || 'Backup-code kon niet worden gelezen.'
     })
   }
 })

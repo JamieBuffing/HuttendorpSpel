@@ -48,107 +48,47 @@ async function recalculateTeamPoints(teamId) {
   return totalPoints
 }
 
-async function saveAnswerFromEsp({
-  postId,
-  cardId,
-  teamId,
-  answer,
-  allowOverwrite = false
-}) {
+async function saveAnswerFromEsp({ postId, cardId, teamId, answer, allowOverwrite = false }) {
   const database = await db()
 
   const cleanPostId = String(postId || '').trim()
+  const cleanCardId = String(cardId || teamId || '').trim().toUpperCase()
+  const selectedAnswer = String(answer || '').trim().toUpperCase()
 
-  const cleanCardId = String(
-    cardId || teamId || ''
-  )
-    .trim()
-    .toUpperCase()
-
-  const selectedAnswer = String(answer || '')
-    .trim()
-    .toUpperCase()
-
-  if (!cleanPostId) {
-    return {
-      ok: false,
-      error: 'postId ontbreekt'
-    }
-  }
-
-  if (!cleanCardId) {
-    return {
-      ok: false,
-      error: 'teamId/cardId ontbreekt'
-    }
-  }
-
-  if (!['R', 'G', 'B'].includes(selectedAnswer)) {
-    return {
-      ok: false,
-      error: 'Ongeldig antwoord'
-    }
-  }
+  if (!cleanPostId) return { ok: false, error: 'postId ontbreekt' }
+  if (!cleanCardId) return { ok: false, error: 'teamId/cardId ontbreekt' }
+  if (!['R', 'G', 'B'].includes(selectedAnswer)) return { ok: false, error: 'Ongeldig antwoord' }
 
   const [team, question] = await Promise.all([
-    database.collection('teams').findOne({
-      cardId: cleanCardId,
-      isActive: { $ne: false }
-    }),
-
-    database.collection('questions').findOne({
-      postId: cleanPostId,
-      type: 'normal',
-      isActive: { $ne: false }
-    })
+    database.collection('teams').findOne({ cardId: cleanCardId, isActive: { $ne: false } }),
+    database.collection('questions').findOne({ postId: cleanPostId, type: 'normal', isActive: { $ne: false } })
   ])
 
-  if (!team) {
-    return {
-      ok: false,
-      error: 'Team niet gevonden',
-      postId: cleanPostId,
-      cardId: cleanCardId
-    }
-  }
+  if (!team) return { ok: false, error: 'Team niet gevonden', postId: cleanPostId, cardId: cleanCardId, answer: selectedAnswer }
+  if (!question) return { ok: false, error: 'Vraag/post niet gevonden', postId: cleanPostId, cardId: cleanCardId, answer: selectedAnswer }
 
-  if (!question) {
-    return {
-      ok: false,
-      error: 'Vraag/post niet gevonden',
-      postId: cleanPostId,
-      cardId: cleanCardId
-    }
-  }
-
-  const existingProgress =
-    (team.questionProgress || []).find(
-      (item) =>
-        item.type === 'normal' &&
-        String(item.questionId) === String(question._id)
-    )
+  const existingProgress = (team.questionProgress || []).find((item) => {
+    return item.type === 'normal' && String(item.questionId) === String(question._id)
+  })
 
   if (existingProgress && !allowOverwrite) {
     return {
       ok: false,
-      alreadyAnswered: true,
       error: 'Vraag al beantwoord',
-      existingAnswer:
-        existingProgress.selectedAnswer,
-      answeredAt:
-        existingProgress.answeredAt,
-      teamName: team.name
+      alreadyAnswered: true,
+      postId: cleanPostId,
+      teamId: cleanCardId,
+      cardId: cleanCardId,
+      answer: selectedAnswer,
+      teamName: team.name,
+      questionTitle: question.title,
+      existingAnswer: existingProgress.selectedAnswer || null,
+      answeredAt: existingProgress.answeredAt || null
     }
   }
 
-  const isCorrect = isCorrectNormal(
-    question,
-    selectedAnswer
-  )
-
-  const pointsEarned = isCorrect
-    ? Number(question.points || 0)
-    : 0
+  const isCorrect = isCorrectNormal(question, selectedAnswer)
+  const pointsEarned = isCorrect ? Number(question.points || 0) : 0
 
   const progressItem = {
     questionId: question._id,
@@ -161,40 +101,29 @@ async function saveAnswerFromEsp({
     answeredAt: new Date()
   }
 
+  if (existingProgress) {
+    await database.collection('teams').updateOne(
+      { _id: team._id },
+      { $pull: { questionProgress: { questionId: question._id } } }
+    )
+  }
+
   await database.collection('teams').updateOne(
+    { _id: team._id },
     {
-      _id: team._id
-    },
-    {
-      $pull: {
-        questionProgress: {
-          questionId: question._id
-        }
-      }
+      $push: { questionProgress: progressItem },
+      $set: { updatedAt: new Date() }
     }
   )
 
-  await database.collection('teams').updateOne(
-    {
-      _id: team._id
-    },
-    {
-      $push: {
-        questionProgress: progressItem
-      },
+  const totalPoints = await recalculateTeamPoints(team._id)
 
-      $set: {
-        updatedAt: new Date()
-      }
-    }
-  )
-  const totalPoints =
-    await recalculateTeamPoints(team._id)
   return {
     ok: true,
     alreadyAnswered: false,
     postId: cleanPostId,
     teamId: cleanCardId,
+    cardId: cleanCardId,
     answer: selectedAnswer,
     teamName: team.name,
     questionTitle: question.title,

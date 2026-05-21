@@ -1,88 +1,237 @@
-<%- include('../partials/page-shell-start', { title: 'Import ESP32 data' }); %>
+<%- include('../partials/page-shell-start', { title: 'Backup scanner' }); %>
 
 <section class="panel">
-  <h1>Import ESP32 data</h1>
-  <p>Plak hier de JSON die je via de ESP32 backup-pagina hebt opgehaald. Dit mag een JSON-array zijn, één JSON-object, of meerdere JSON-objecten onder elkaar.</p>
+  <h1>Backup scanner</h1>
+  <p>Scan hier de backup-code van het OLED-scherm van een postbox. De oude JSON-import is hiermee vervangen.</p>
 
   <% if (error) { %>
     <p class="error"><%= error %></p>
   <% } %>
-    <br>
-  <form method="post" action="/import" class="formStack">
-    <label>ESP32 JSON
-      <textarea name="json" id="jsonInput" rows="14" placeholder='[{"postId":"p01","teamId":"04AABBCC","answer":"R"}]'><%= rawJson || '' %></textarea>
-    </label>
+
+  <div class="backupScanner">
+    <div class="scannerVideoWrap">
+      <video id="backupVideo" playsinline muted></video>
+      <div class="scannerOverlay">
+        <div class="scannerFrame"></div>
+      </div>
+      <canvas id="scanCanvas" width="128" height="64" hidden></canvas>
+    </div>
+
+    <div class="scannerControls">
+      <button class="button" type="button" id="startCameraBtn">Camera starten</button>
+      <button class="button secondary" type="button" id="scanOnceBtn" disabled>Scan nu</button>
+      <button class="button secondary" type="button" id="stopCameraBtn" disabled>Camera stoppen</button>
+    </div>
 
     <p class="helpText">
-      Herkend: <strong id="objectCount"><%= parsedCount || 0 %></strong> object(en)
+      Houd de witte rand van de OLED-code precies binnen het kader. Zorg dat het scherm helder, recht en scherp in beeld is.
     </p>
 
-    <button class="button" type="submit">Objecten opslaan</button>
-  </form>
+    <div id="scanMessage" class="scannerMessage">Nog niet gescand.</div>
+
+    <details class="manualFallback">
+      <summary>Handmatig testen met 6 bitregels</summary>
+      <form method="post" action="/import" class="formStack">
+        <label>6 regels van 16 bits
+          <textarea name="rows" rows="7" placeholder="1110000000011101&#10;0000010000101010&#10;0001011010111010&#10;1111110000100000&#10;1001000100000000&#10;0000000000000000"></textarea>
+        </label>
+        <button class="button" type="submit">Handmatig importeren</button>
+      </form>
+    </details>
+  </div>
 </section>
 
-<% if (results && results.length) { %>
+<% if (result) { %>
   <section class="panel">
     <h2>Import resultaat</h2>
-
     <table class="dataTable">
-      <thead>
-        <tr>
-          <th>Status</th>
-          <th>Post</th>
-          <th>Team</th>
-          <th>Antwoord</th>
-          <th>Punten</th>
-          <th>Melding</th>
-        </tr>
-      </thead>
       <tbody>
-        <% results.forEach((result) => { %>
-          <tr class="<%= result.ok ? '' : 'mutedRow' %>">
-            <td><%= result.ok ? 'Opgeslagen' : 'Niet opgeslagen' %></td>
-            <td><%= result.postId || '-' %></td>
-            <td><%= result.teamName || result.teamId || result.cardId || '-' %></td>
-            <td><%= result.answer || '-' %></td>
-            <td><%= result.ok ? result.pointsEarned : '-' %></td>
-            <td><%= result.ok ? result.questionTitle : result.error %></td>
-          </tr>
-        <% }) %>
+        <tr><th>Post</th><td><%= result.decoded.postId %></td></tr>
+        <tr><th>UID</th><td><%= result.decoded.uid %></td></tr>
+        <tr><th>Antwoord</th><td><%= result.decoded.answer %></td></tr>
+        <tr><th>Status</th><td><%= result.result.ok ? 'Opgeslagen' : (result.result.alreadyAnswered ? 'Al gedaan' : 'Niet opgeslagen') %></td></tr>
+        <tr><th>Melding</th><td><%= result.result.questionTitle || result.result.error || '-' %></td></tr>
       </tbody>
     </table>
   </section>
 <% } %>
 
+<style>
+  .backupScanner { display: grid; gap: 1rem; }
+  .scannerVideoWrap { position: relative; width: min(100%, 720px); margin: 0 auto; background: #050505; border-radius: 16px; overflow: hidden; aspect-ratio: 2 / 1; }
+  #backupVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scannerOverlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+  .scannerFrame { width: 82%; aspect-ratio: 2 / 1; border: 3px solid #00ff88; border-radius: 8px; box-shadow: 0 0 0 999px rgba(0,0,0,.28); }
+  .scannerControls { display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center; }
+  .scannerMessage { padding: .9rem 1rem; border-radius: 12px; background: #111; color: #fff; text-align: center; font-weight: 700; }
+  .scannerMessage.ok { background: #063; }
+  .scannerMessage.error { background: #700; }
+  .scannerMessage.busy { background: #665000; }
+  .manualFallback { margin-top: .5rem; }
+</style>
+
 <script>
-  const jsonInput = document.getElementById('jsonInput');
-  const objectCount = document.getElementById('objectCount');
+(() => {
+  const video = document.getElementById('backupVideo')
+  const canvas = document.getElementById('scanCanvas')
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  const startBtn = document.getElementById('startCameraBtn')
+  const scanBtn = document.getElementById('scanOnceBtn')
+  const stopBtn = document.getElementById('stopCameraBtn')
+  const message = document.getElementById('scanMessage')
 
-  function countObjects(raw) {
-    const value = String(raw || '').trim();
-    if (!value) return 0;
+  let stream = null
+  let scanTimer = null
+  let lastRows = ''
+  let lastSubmitAt = 0
 
+  function setMessage(text, type = '') {
+    message.textContent = text
+    message.className = 'scannerMessage ' + type
+  }
+
+  function stopCamera() {
+    if (scanTimer) window.clearInterval(scanTimer)
+    scanTimer = null
+    if (stream) stream.getTracks().forEach((track) => track.stop())
+    stream = null
+    video.srcObject = null
+    scanBtn.disabled = true
+    stopBtn.disabled = true
+    startBtn.disabled = false
+  }
+
+  async function startCamera() {
     try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed.length : 1;
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      })
+      video.srcObject = stream
+      await video.play()
+      scanBtn.disabled = false
+      stopBtn.disabled = false
+      startBtn.disabled = true
+      setMessage('Camera gestart. Richt het kader op de OLED-code.', 'busy')
+      scanTimer = window.setInterval(scanAndMaybeSubmit, 700)
     } catch (error) {
-      try {
-        return value
-          .split('\n')
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-          .length;
-      } catch (lineError) {
-        return 0;
-      }
+      setMessage('Camera kon niet starten: ' + (error.message || error), 'error')
     }
   }
 
-  function updateCount() {
-    objectCount.textContent = countObjects(jsonInput.value);
+  function getCenterCrop(videoWidth, videoHeight) {
+    const targetRatio = 2
+    let cropWidth = videoWidth
+    let cropHeight = Math.round(cropWidth / targetRatio)
+
+    if (cropHeight > videoHeight) {
+      cropHeight = videoHeight
+      cropWidth = Math.round(cropHeight * targetRatio)
+    }
+
+    return {
+      x: Math.floor((videoWidth - cropWidth) / 2),
+      y: Math.floor((videoHeight - cropHeight) / 2),
+      width: cropWidth,
+      height: cropHeight
+    }
   }
 
-  jsonInput.addEventListener('input', updateCount);
-  updateCount();
+  function readRowsFromFrame() {
+    if (!video.videoWidth || !video.videoHeight) return null
+
+    const crop = getCenterCrop(video.videoWidth, video.videoHeight)
+    ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, 128, 64)
+
+    const image = ctx.getImageData(0, 0, 128, 64)
+    const data = image.data
+    const brightness = []
+
+    for (let y = 0; y < 64; y++) {
+      brightness[y] = []
+      for (let x = 0; x < 128; x++) {
+        const i = (y * 128 + x) * 4
+        brightness[y][x] = (data[i] + data[i + 1] + data[i + 2]) / 3
+      }
+    }
+
+    // Dynamische drempel: OLED-wit moet duidelijk boven de achtergrond zitten.
+    const samples = []
+    for (let y = 0; y < 64; y += 2) {
+      for (let x = 0; x < 128; x += 2) samples.push(brightness[y][x])
+    }
+    samples.sort((a, b) => a - b)
+    const low = samples[Math.floor(samples.length * 0.20)] || 0
+    const high = samples[Math.floor(samples.length * 0.92)] || 255
+    const threshold = Math.max(35, (low + high) / 2)
+
+    const rows = []
+    for (let row = 0; row < 6; row++) {
+      const bits = []
+      const yStart = 3 + row * 9
+      for (let bit = 0; bit < 16; bit++) {
+        const xStart = 6 + bit * 3
+        let total = 0
+        let white = 0
+        for (let yy = yStart; yy < yStart + 7; yy++) {
+          for (let xx = xStart; xx < xStart + 3; xx++) {
+            total++
+            if (brightness[yy]?.[xx] > threshold) white++
+          }
+        }
+        bits.push(white / total > 0.32 ? '1' : '0')
+      }
+      rows.push(bits.join(''))
+    }
+
+    return rows
+  }
+
+  async function submitRows(rows) {
+    const key = rows.join('|')
+    if (key === lastRows && Date.now() - lastSubmitAt < 4500) return
+
+    lastRows = key
+    lastSubmitAt = Date.now()
+    setMessage('Code gelezen, importeren...', 'busy')
+
+    const response = await fetch('/import/scan-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows })
+    })
+
+    const result = await response.json()
+
+    if (!response.ok || !result.ok) {
+      setMessage(result.error || result.result?.error || 'Import mislukt. Probeer opnieuw.', 'error')
+      return
+    }
+
+    const decoded = result.decoded
+    const status = result.alreadyAnswered ? 'al gedaan' : 'opgeslagen'
+    setMessage(`Gelukt: ${decoded.postId} / ${decoded.uid} / ${decoded.answer} (${status})`, 'ok')
+  }
+
+  async function scanAndMaybeSubmit() {
+    try {
+      const rows = readRowsFromFrame()
+      if (!rows) return
+      await submitRows(rows)
+    } catch (error) {
+      setMessage(error.message || 'Nog geen geldige code gelezen.', 'error')
+    }
+  }
+
+  startBtn.addEventListener('click', startCamera)
+  scanBtn.addEventListener('click', scanAndMaybeSubmit)
+  stopBtn.addEventListener('click', stopCamera)
+  window.addEventListener('pagehide', stopCamera)
+})()
 </script>
 
 <%- include('../partials/page-shell-end'); %>
