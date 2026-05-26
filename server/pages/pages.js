@@ -98,99 +98,8 @@ router.get('/leiding-overzicht', requireLogin, async (req, res, next) => {
   }
 })
 
-const PIXELMAP_DATA_ZONES = [
-  { x: 4, y: 4, w: 111, h: 8 },
-  { x: 4, y: 13, w: 120, h: 8 },
-  { x: 4, y: 22, w: 120, h: 8 },
-  { x: 4, y: 31, w: 120, h: 8 },
-  { x: 4, y: 40, w: 120, h: 8 },
-  { x: 4, y: 49, w: 120, h: 8 }
-]
-
-function barcodeChecksum(data) {
-  let total = 0
-  for (const char of String(data || '')) total += char.charCodeAt(0)
-  const value = total % 16
-  return value < 10 ? String(value) : String.fromCharCode(65 + value - 10)
-}
-
-function hexFromBits(bitString) {
-  const clean = String(bitString || '').replace(/[^01]/g, '')
-  let hex = ''
-
-  for (let i = 0; i + 3 < clean.length; i += 4) {
-    hex += parseInt(clean.slice(i, i + 4), 2).toString(16).toUpperCase()
-  }
-
-  return hex
-}
-
-function decodePixelmapBitString(bitString) {
-  const hex = hexFromBits(bitString)
-
-  if (hex.length < 4) throw new Error('Code is te kort')
-
-  const rawLength = parseInt(hex.slice(0, 2), 16)
-  if (!Number.isFinite(rawLength) || rawLength < 5) throw new Error('Lengte in code is ongeldig')
-
-  const neededLength = 2 + rawLength + 1
-  if (hex.length < neededLength) throw new Error('Code is niet compleet')
-
-  const raw = hex.slice(2, 2 + rawLength)
-  const checksum = hex.slice(2 + rawLength, 2 + rawLength + 1)
-  const expected = barcodeChecksum(raw)
-
-  if (checksum !== expected) {
-    throw new Error(`Checksum klopt niet (${checksum} ≠ ${expected})`)
-  }
-
-  const postId = raw.slice(0, 3).toLowerCase()
-  const answer = raw.slice(3, 4).toUpperCase()
-  const uid = raw.slice(4).toUpperCase()
-
-  if (!postId || !uid || !['R', 'G', 'B'].includes(answer)) {
-    throw new Error('Code bevat geen geldige post, UID of antwoord')
-  }
-
-  return { postId, uid, answer, raw, checksum }
-}
-
 router.get('/import', requireLogin, (req, res) => {
   res.render('pages/import', {
-<<<<<<< Updated upstream
-    result: null,
-    error: null,
-    zones: PIXELMAP_DATA_ZONES
-  })
-})
-
-router.post('/import/scan-code', requireLogin, async (req, res) => {
-  try {
-    const decoded = decodePixelmapBitString(req.body.bitString || '')
-
-    const result = await saveAnswerFromEsp({
-      postId: decoded.postId,
-      cardId: decoded.uid,
-      teamId: decoded.uid,
-      answer: decoded.answer,
-      allowOverwrite: false
-    })
-
-    if (!result.ok && result.alreadyAnswered) {
-      return res.json({ ok: true, alreadyAnswered: true, decoded, result })
-    }
-
-    if (!result.ok) {
-      return res.status(400).json({ ok: false, error: result.error || 'Opslaan mislukt', decoded, result })
-    }
-
-    res.json({ ok: true, decoded, result })
-  } catch (error) {
-    res.status(400).json({ ok: false, error: error.message || 'Code kon niet gelezen worden' })
-  }
-})
-
-=======
     rawJson: '',
     parsedCount: 0,
     results: [],
@@ -198,32 +107,10 @@ router.post('/import/scan-code', requireLogin, async (req, res) => {
   })
 })
 
->>>>>>> Stashed changes
 router.post('/import', requireLogin, async (req, res) => {
   const rawJson = String(req.body.json || '')
 
   try {
-<<<<<<< Updated upstream
-    const decoded = decodePixelmapBitString(req.body.bitString || req.body.code || '')
-    const result = await saveAnswerFromEsp({
-      postId: decoded.postId,
-      cardId: decoded.uid,
-      teamId: decoded.uid,
-      answer: decoded.answer,
-      allowOverwrite: false
-    })
-
-    res.render('pages/import', {
-      result: { decoded, result },
-      error: result.ok || result.alreadyAnswered ? null : result.error,
-      zones: PIXELMAP_DATA_ZONES
-    })
-  } catch (error) {
-    res.status(400).render('pages/import', {
-      result: null,
-      error: error.message || 'Code kon niet gelezen worden',
-      zones: PIXELMAP_DATA_ZONES
-=======
     const objects = parseBackupJson(rawJson)
     const results = []
 
@@ -248,7 +135,6 @@ router.post('/import', requireLogin, async (req, res) => {
       parsedCount: 0,
       results: [],
       error: 'Ongeldige JSON. Plak een JSON-array, één JSON-object, of meerdere JSON-objecten onder elkaar.'
->>>>>>> Stashed changes
     })
   }
 })
