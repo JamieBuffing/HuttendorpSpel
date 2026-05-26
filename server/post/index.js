@@ -169,6 +169,7 @@ router.post('/api/box/check-card', async (req, res, next) => {
       uid,
       postId,
       teamId: String(team._id),
+      cardId: team.cardId,
       teamName: team.name,
       questionTitle: question.title,
       alreadyAnswered: Boolean(existingProgress),
@@ -185,13 +186,13 @@ router.post('/api/box/submit-answer', async (req, res, next) => {
     const result = await saveAnswerFromEsp({
       postId: req.body.postId,
       cardId: req.body.uid || req.body.cardId || req.body.teamId,
-      teamId: req.body.teamId || req.body.cardId || req.body.uid,
+      teamId: req.body.teamId || req.body.uid || req.body.cardId,
       answer: req.body.answer,
       allowOverwrite: false
     })
 
     if (!result.ok) {
-      const status = result.alreadyAnswered ? 409 : (['Team niet gevonden', 'Vraag/post niet gevonden'].includes(result.error) ? 404 : 400)
+      const status = result.alreadyAnswered ? 409 : 400
       return res.status(status).json(result)
     }
 

@@ -101,12 +101,10 @@ async function saveAnswerFromEsp({ postId, cardId, teamId, answer, allowOverwrit
     answeredAt: new Date()
   }
 
-  if (existingProgress) {
-    await database.collection('teams').updateOne(
-      { _id: team._id },
-      { $pull: { questionProgress: { questionId: question._id } } }
-    )
-  }
+  await database.collection('teams').updateOne(
+    { _id: team._id },
+    { $pull: { questionProgress: { questionId: question._id } } }
+  )
 
   await database.collection('teams').updateOne(
     { _id: team._id },

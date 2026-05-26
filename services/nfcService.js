@@ -1,5 +1,11 @@
-const {EventEmitter}=require('events');
-class NFCService extends EventEmitter{
- start(){console.log('NFC service stub gestart')}
+const { EventEmitter } = require('events')
+
+class NfcService extends EventEmitter {
+  start() {
+    if (process.env.NFC_SERVICE_DEBUG === '1') {
+      console.log('[nfcService] Stub gestart')
+    }
+  }
 }
-module.exports=new NFCService();
+
+module.exports = new NfcService()

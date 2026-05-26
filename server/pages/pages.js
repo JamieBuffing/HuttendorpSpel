@@ -13,104 +13,132 @@ const {
 
 const router = express.Router()
 
-function nibbleToHex(value) {
-  const clean = Number(value || 0) & 15
-  return clean < 10 ? String(clean) : String.fromCharCode(55 + clean)
-}
+function parseBackupJson(raw) {
+  const value = String(raw || '').trim()
+  if (!value) return []
 
-function checksumHex(data) {
-  const total = String(data || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) % 16
-  return nibbleToHex(total)
-}
-
-function bitsToNibble(bits) {
-  return String(bits || '').split('').reduce((value, bit) => (value << 1) + (bit === '1' ? 1 : 0), 0) & 15
-}
-
-function rowBitsToNibbles(row) {
-  const cleanRow = String(row || '').replace(/[^01]/g, '')
-  if (!cleanRow) return []
-  if (cleanRow.length % 4 !== 0) {
-    throw new Error('Elke coderegel moet uit groepjes van 4 bits bestaan.')
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : [parsed]
+  } catch (error) {
+    return value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
   }
-
-  const nibbles = []
-  for (let i = 0; i < cleanRow.length; i += 4) {
-    nibbles.push(bitsToNibble(cleanRow.slice(i, i + 4)))
-  }
-  return nibbles
 }
 
-function decodeBackupPayloadNibbles(nibbles) {
-  if (!Array.isArray(nibbles) || nibbles.length < 6) return null
+function normalizeRawRows(rows) {
+  if (!Array.isArray(rows)) return []
+  return rows
+    .slice(0, 6)
+    .map((row) => String(row || '').replace(/[^01]/g, ''))
+}
 
-  // Payload uit de ESP32:
-  // P + postnummer(2) + antwoord(R/G/B) + UID(hex, variabele lengte) + checksum + optionele nullen
-  if (nibbles[0] !== 14) return null // P
+function checksum(data) {
+  const total = String(data || '')
+    .split('')
+    .reduce((sum, char) => sum + char.charCodeAt(0), 0) % 16
+  return total < 10 ? String(total) : String.fromCharCode(55 + total)
+}
 
-  const answerMap = { 13: 'R', 12: 'G', 11: 'B' }
-  const answer = answerMap[nibbles[3]]
-  if (!answer) return null
-
-  const postId = `p${nibbleToHex(nibbles[1])}${nibbleToHex(nibbles[2])}`.toLowerCase()
-
-  // Checksumpositie is variabel, omdat UID-lengte variabel is.
-  // We proberen elke mogelijke positie en accepteren alleen als checksum klopt
-  // en alles daarna padding-0 is.
-  for (let checksumIndex = 8; checksumIndex < nibbles.length; checksumIndex++) {
-    const uidNibbles = nibbles.slice(4, checksumIndex)
-    if (uidNibbles.length < 4) continue
-
-    const trailing = nibbles.slice(checksumIndex + 1)
-    if (trailing.some((value) => value !== 0)) continue
-
-    const uid = uidNibbles.map(nibbleToHex).join('').toUpperCase()
-    const checksum = nibbleToHex(nibbles[checksumIndex])
-    const expectedChecksum = checksumHex(`P${postId.slice(1).toUpperCase()}${answer}${uid}`)
-
-    if (checksum === expectedChecksum) {
-      return { postId, uid, answer, checksum }
-    }
+function valueToPayloadChar(value, index) {
+  if (index === 0) return value === 14 ? 'P' : null
+  if (index === 3) {
+    if (value === 11) return 'B'
+    if (value === 12) return 'G'
+    if (value === 13) return 'R'
+    return null
   }
-
+  if (value >= 0 && value <= 9) return String(value)
+  if (value >= 10 && value <= 15) return String.fromCharCode(55 + value)
   return null
 }
 
-function decodeBackupRows(rows) {
-  if (typeof rows === 'string') {
-    rows = rows
-      .split('\n')
-      .map((row) => row.trim())
-      .filter(Boolean)
-  }
+function parsePayload(payload) {
+  const clean = String(payload || '').trim().toUpperCase().replace(/[^0-9A-FP RGB]/g, '').replace(/\s/g, '')
+  if (clean.length < 6) return null
 
-  if (!Array.isArray(rows) || rows.length !== 6) {
-    throw new Error('Er zijn exact 6 coderegels nodig.')
-  }
+  const data = clean.slice(0, -1)
+  const check = clean.slice(-1)
+  if (checksum(data) !== check) return null
+  if (data[0] !== 'P') return null
 
-  const rowNibbles = rows.map(rowBitsToNibbles)
-  const maxWidth = Math.max(...rowNibbles.map((row) => row.length))
+  const postId = data.slice(0, 3).toLowerCase()
+  const answer = data[3]
+  const uid = data.slice(4).toUpperCase()
 
-  if (maxWidth < 1) {
-    throw new Error('Er zijn geen bits gelezen.')
-  }
+  if (!/^p\d\d$/.test(postId)) return null
+  if (!['R', 'G', 'B'].includes(answer)) return null
+  if (!/^[0-9A-F]+$/.test(uid)) return null
 
-  // Nieuwe ESP32-code verdeelt payload over 6 regels, maar de scanner leest per regel
-  // vaak een vaste maximale breedte. Daarom proberen we verschillende regelbreedtes
-  // en zoeken we de combinatie waarvan checksum + padding klopt.
-  for (let width = 1; width <= maxWidth; width++) {
-    const nibbles = []
-    for (const row of rowNibbles) {
-      for (let i = 0; i < width; i++) {
-        nibbles.push(row[i] || 0)
+  return { postId, uid, cardId: uid, teamId: uid, answer, payload: clean }
+}
+
+function decodeRowsWithCandidate(rawRows, payloadLength) {
+  const rows = normalizeRawRows(rawRows)
+  if (rows.length !== 6 || rows.some((row) => !row)) return null
+
+  const charsPerRow = Math.ceil(payloadLength / 6)
+  const values = []
+
+  for (let rowIndex = 0; rowIndex < 6; rowIndex++) {
+    const remaining = payloadLength - values.length
+    if (remaining <= 0) break
+
+    const charsThisRow = Math.min(charsPerRow, remaining)
+    const bitsThisRow = charsThisRow * 4
+
+    let blockWidth = 3
+    if (bitsThisRow > 36) blockWidth = 2
+    if (bitsThisRow > 56) blockWidth = 1
+
+    const row = rows[rowIndex]
+
+    for (let charIndex = 0; charIndex < charsThisRow; charIndex++) {
+      let value = 0
+
+      for (let bitIndex = 0; bitIndex < 4; bitIndex++) {
+        const logicalBitIndex = charIndex * 4 + bitIndex
+        const start = logicalBitIndex * blockWidth
+        const sample = row.slice(start, start + blockWidth)
+        const ones = sample.split('').filter((bit) => bit === '1').length
+        const bit = ones >= Math.ceil(Math.max(blockWidth, 1) / 2) ? 1 : 0
+        value = (value << 1) | bit
       }
-    }
 
-    const decoded = decodeBackupPayloadNibbles(nibbles)
+      values.push(value)
+    }
+  }
+
+  if (values.length !== payloadLength) return null
+
+  let payload = ''
+  for (let i = 0; i < values.length; i++) {
+    const char = valueToPayloadChar(values[i], i)
+    if (!char) return null
+    payload += char
+  }
+
+  return parsePayload(payload)
+}
+
+function decodeOledBackupCode({ rawRows, payload }) {
+  if (payload) {
+    const parsed = parsePayload(payload)
+    if (parsed) return parsed
+  }
+
+  const rows = normalizeRawRows(rawRows)
+  if (rows.length !== 6) return null
+
+  for (let payloadLength = 6; payloadLength <= 54; payloadLength++) {
+    const decoded = decodeRowsWithCandidate(rows, payloadLength)
     if (decoded) return decoded
   }
 
-  throw new Error('Backup-code kon niet worden gedecodeerd. Probeer rechter/scherper te scannen.')
+  return null
 }
 
 router.get('/', (req, res) => res.redirect('/dashboard'))
@@ -189,58 +217,73 @@ router.get('/import', requireLogin, (req, res) => {
   })
 })
 
-router.post('/import/scan-code', requireLogin, async (req, res) => {
+router.post('/import/scan-code', requireLogin, async (req, res, next) => {
   try {
-    const decoded = decodeBackupRows(req.body.rows)
+    const decoded = decodeOledBackupCode({
+      rawRows: req.body.rawRows,
+      payload: req.body.payload
+    })
+
+    if (!decoded) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Code niet herkend of checksum klopt niet. Houd het OLED-scherm recht in het kader en probeer opnieuw.'
+      })
+    }
+
     const result = await saveAnswerFromEsp({
       postId: decoded.postId,
-      teamId: decoded.uid,
       cardId: decoded.uid,
+      teamId: decoded.uid,
       answer: decoded.answer,
       allowOverwrite: false
     })
 
-    res.status(result.ok || result.alreadyAnswered ? 200 : 400).json({
-      ok: Boolean(result.ok || result.alreadyAnswered),
-      decoded,
-      result,
-      alreadyAnswered: Boolean(result.alreadyAnswered)
-    })
+    if (!result.ok && result.alreadyAnswered) {
+      return res.json({
+        ok: true,
+        alreadyAnswered: true,
+        decoded,
+        result,
+        message: 'Antwoord stond al in de database.'
+      })
+    }
+
+    if (!result.ok) {
+      return res.status(400).json({ ok: false, decoded, result, error: result.error || 'Import mislukt' })
+    }
+
+    res.json({ ok: true, decoded, result, message: 'Backup antwoord opgeslagen.' })
   } catch (error) {
-    res.status(400).json({
-      ok: false,
-      error: error.message || 'Backup-code kon niet worden gelezen.'
-    })
+    next(error)
   }
 })
 
 router.post('/import', requireLogin, async (req, res) => {
+  const rawJson = String(req.body.json || '')
+
   try {
-    let rows = req.body.rows
-    if (typeof rows === 'string') {
-      rows = rows
-        .split('\n')
-        .map((row) => row.trim())
-        .filter(Boolean)
+    const objects = parseBackupJson(rawJson)
+    const results = []
+
+    for (const item of objects) {
+      results.push(await saveAnswerFromEsp({
+        postId: item.postId || item.id,
+        teamId: item.teamId || item.cardId,
+        cardId: item.cardId || item.teamId,
+        answer: item.answer,
+        allowOverwrite: false
+      }))
     }
 
-    const decoded = decodeBackupRows(rows)
-    const result = await saveAnswerFromEsp({
-      postId: decoded.postId,
-      teamId: decoded.uid,
-      cardId: decoded.uid,
-      answer: decoded.answer,
-      allowOverwrite: false
-    })
-
     res.render('pages/import', {
-      result: { decoded, result },
+      result: { legacy: true, results, count: objects.length },
       error: null
     })
   } catch (error) {
     res.status(400).render('pages/import', {
       result: null,
-      error: error.message || 'Backup-code kon niet worden gelezen.'
+      error: 'Ongeldige import.'
     })
   }
 })
