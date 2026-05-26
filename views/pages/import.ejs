@@ -2,7 +2,7 @@
 
 <section class="panel">
   <h1>Backup import</h1>
-  <p>Scan de framed OLED-backupcode van een ESP32-box. De scanner zoekt de heldere/blauwe rand en de marker rechtsboven automatisch.</p>
+  <p>Scan de OLED-backupcode van een ESP32-box. De scanner zoekt de heldere rand, de L-marker rechtsboven en leest daarna de blauwe dataregels.</p>
 
   <% if (error) { %>
     <p class="error"><%= error %></p>
@@ -14,7 +14,7 @@
         <video id="cameraVideo" autoplay playsinline muted></video>
         <canvas id="workCanvas" width="320" height="180"></canvas>
         <canvas id="previewCanvas" width="128" height="64"></canvas>
-        <div class="scanGuide"><span>Zoek OLED-rand + marker</span></div>
+        <div class="scanGuide"><span>Zoek OLED-rand + L-marker</span></div>
       </div>
 
       <div class="buttonRow" style="margin-top: 1rem; gap: .5rem; flex-wrap: wrap;">
@@ -69,6 +69,15 @@
   const manualPayloadForm = document.getElementById('manualPayloadForm')
   const manualPayload = document.getElementById('manualPayload')
 
+  const ROWS = 6
+  const DATA_X = 4
+  const DATA_Y = 9
+  const DATA_ROW_H = 8
+  const DATA_ROW_STEP = 9
+  const DATA_BIT_W = 2
+  const DATA_ROW1_W = 111
+  const DATA_ROW_W = 120
+
   let autoScan = false
   let autoTimer = null
   let stream = null
@@ -86,7 +95,7 @@
         audio: false
       })
       video.srcObject = stream
-      setStatus('Camera gestart. Houd de OLED-code recht en scherp in beeld.')
+      setStatus('Camera gestart. Houd de OLED-code recht, groot en scherp in beeld.')
     } catch (error) {
       setStatus('Camera starten mislukt: ' + error.message, 'error')
     }
@@ -97,42 +106,26 @@
     return [data[idx], data[idx + 1], data[idx + 2]]
   }
 
-  function getBrightness(data, width, x, y) {
-    const [r, g, b] = getRgb(data, width, x, y)
-    return (r + g + b) / 3
-  }
-
-  function isLitRgb(r, g, b, threshold = 90) {
-    const max = Math.max(r, g, b)
-    const min = Math.min(r, g, b)
+  function isLitRgb(r, g, b, threshold = 85) {
     const brightness = (r + g + b) / 3
-
-    // Werkt voor witte OLED én blauwe OLED. Blauw OLED heeft vaak veel B,
-    // maar door camera-focus kan het ook lichtblauw/wit uitsmeren.
-    const brightEnough = brightness > threshold
-    const blueEnough = b > 70 && b >= r * 0.75 && b >= g * 0.75 && max - min > 18
-    const veryBright = max > 150 && brightness > 70
-
-    return brightEnough || blueEnough || veryBright
+    const max = Math.max(r, g, b)
+    const blueEnough = b > 55 && b >= r * 0.72 && b >= g * 0.72
+    const brightEnough = brightness > threshold || max > 145
+    return brightEnough || blueEnough
   }
 
   function thresholdForImage(image) {
     const samples = []
-    const data = image.data
-    const width = image.width
-    const height = image.height
-
-    for (let y = 0; y < height; y += 3) {
-      for (let x = 0; x < width; x += 3) {
-        const [r, g, b] = getRgb(data, width, x, y)
+    for (let y = 0; y < image.height; y += 3) {
+      for (let x = 0; x < image.width; x += 3) {
+        const [r, g, b] = getRgb(image.data, image.width, x, y)
         samples.push((r + g + b) / 3)
       }
     }
-
     samples.sort((a, b) => a - b)
-    const dark = samples[Math.floor(samples.length * 0.35)] || 0
+    const dark = samples[Math.floor(samples.length * 0.40)] || 0
     const light = samples[Math.floor(samples.length * 0.96)] || 255
-    return Math.max(45, Math.min(160, (dark + light) / 2))
+    return Math.max(42, Math.min(150, (dark + light) / 2))
   }
 
   function litAt(image, x, y, threshold) {
@@ -144,7 +137,6 @@
   function sampleLitRatio(image, x, y, w, h, threshold) {
     let lit = 0
     let total = 0
-
     for (let yy = Math.round(y); yy < Math.round(y + h); yy++) {
       for (let xx = Math.round(x); xx < Math.round(x + w); xx++) {
         if (xx < 0 || yy < 0 || xx >= image.width || yy >= image.height) continue
@@ -152,7 +144,6 @@
         if (litAt(image, xx, yy, threshold)) lit++
       }
     }
-
     return total ? lit / total : 0
   }
 
@@ -162,7 +153,6 @@
     const threshold = thresholdForImage(image)
     let minX = w, minY = h, maxX = 0, maxY = 0, count = 0
 
-    // Zoek alle heldere/blauwe OLED-pixels. Niet alleen wit, want veel OLEDs zijn blauw.
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         if (litAt(image, x, y, threshold)) {
@@ -179,22 +169,16 @@
 
     let boxW = maxX - minX + 1
     let boxH = maxY - minY + 1
-
-    // De OLED-code is exact 2:1. Corrigeer de crop rond de gevonden pixels.
     const cx = (minX + maxX) / 2
     const cy = (minY + maxY) / 2
     const targetRatio = 2
     const ratio = boxW / Math.max(1, boxH)
 
-    if (ratio > targetRatio) {
-      boxH = boxW / targetRatio
-    } else {
-      boxW = boxH * targetRatio
-    }
+    if (ratio > targetRatio) boxH = boxW / targetRatio
+    else boxW = boxH * targetRatio
 
-    // Iets ruimer croppen omdat camera-onscherpte en perspectief randpixels kunnen missen.
-    boxW *= 1.14
-    boxH *= 1.20
+    boxW *= 1.10
+    boxH *= 1.16
 
     minX = Math.max(0, Math.round(cx - boxW / 2))
     maxX = Math.min(w - 1, Math.round(cx + boxW / 2))
@@ -207,8 +191,8 @@
   function normalizeFrameFromCamera() {
     if (!video.videoWidth || !video.videoHeight) return null
 
-    workCanvas.width = 320
-    workCanvas.height = 180
+    workCanvas.width = 360
+    workCanvas.height = 202
     workCtx.drawImage(video, 0, 0, workCanvas.width, workCanvas.height)
     const image = workCtx.getImageData(0, 0, workCanvas.width, workCanvas.height)
     const box = findBrightBox(image)
@@ -224,42 +208,44 @@
 
   function markerLooksRight(image) {
     const threshold = thresholdForImage(image)
-
-    // Huidige Arduino marker: 8x8 helder blok rechtsboven met klein donker gat.
-    // Door onscherpte gebruiken we verhoudingen in plaats van exact pixels.
-    const markerRatio = sampleLitRatio(image, 116, 4, 8, 8, threshold)
-    const holeRatio = sampleLitRatio(image, 119, 7, 2, 2, threshold)
-
-    // Fallback: als het zwarte gat door onscherpte dichtloopt, accepteren we veel licht in de markerzone.
-    return markerRatio > 0.38 && holeRatio < 0.95
+    const topLine = sampleLitRatio(image, 117, 2, 9, 2, threshold)
+    const leftLine = sampleLitRatio(image, 117, 2, 2, 9, threshold)
+    return topLine > 0.38 && leftLine > 0.38
   }
 
-  function rawRowsFromNormalized(image) {
+  function bitCell(image, x, y, w, h, threshold) {
+    // Data is blauw/licht, achtergrond zwart. We gebruiken een hele cel,
+    // zodat onscherpte en OLED-blooming minder problemen geven.
+    return sampleLitRatio(image, x, y, w, h, threshold) > 0.28 ? '1' : '0'
+  }
+
+  function readBitStreamFromNormalized(image) {
     const threshold = thresholdForImage(image)
 
     if (!markerLooksRight(image)) {
-      throw new Error('Marker rechtsboven niet gevonden. Houd de code rechtop in beeld en tik op je scherm om scherp te stellen.')
+      throw new Error('L-marker rechtsboven niet gevonden. Houd de code rechtop en tik om scherp te stellen.')
     }
 
-    const rows = []
-    for (let row = 0; row < 6; row++) {
-      const yCenter = 16 + row * 7 + 2
-      let bits = ''
+    let bits = ''
 
-      for (let x = 0; x < 128; x++) {
-        // Meet een klein blokje i.p.v. 1 pixel. Dat helpt bij blauwe OLED + onscherpte.
-        const ratio = sampleLitRatio(image, x, yCenter - 2, 1, 5, threshold)
-        bits += ratio > 0.32 ? '1' : '0'
+    for (let row = 0; row < ROWS; row++) {
+      const rowWidth = row === 0 ? DATA_ROW1_W : DATA_ROW_W
+      const cells = Math.floor(rowWidth / DATA_BIT_W)
+      const y = DATA_Y + row * DATA_ROW_STEP
+
+      for (let i = 0; i < cells; i++) {
+        const x = DATA_X + i * DATA_BIT_W
+        bits += bitCell(image, x, y, DATA_BIT_W, DATA_ROW_H, threshold)
       }
-      rows.push(bits)
     }
-    return rows
+
+    return bits
   }
 
-  function thresholdRowsFromFrame() {
+  function scanBitsFromFrame() {
     const normalized = normalizeFrameFromCamera()
     if (!normalized) return null
-    return rawRowsFromNormalized(normalized)
+    return readBitStreamFromNormalized(normalized)
   }
 
   async function sendToServer(payload) {
@@ -268,10 +254,8 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-
     const json = await response.json().catch(() => ({ ok: false, error: 'Ongeldig serverantwoord' }))
     debugOutput.textContent = JSON.stringify(json, null, 2)
-
     if (!response.ok || !json.ok) throw new Error(json.error || 'Import mislukt')
     return json
   }
@@ -280,9 +264,9 @@
     if (busy) return
     busy = true
     try {
-      const rawRows = thresholdRowsFromFrame()
-      if (!rawRows) throw new Error('Geen scanregels gevonden')
-      const json = await sendToServer({ rawRows })
+      const rawBits = scanBitsFromFrame()
+      if (!rawBits) throw new Error('Geen codebits gevonden')
+      const json = await sendToServer({ rawBits })
       const decoded = json.decoded || {}
       setStatus(`Gelukt: ${decoded.postId || '-'} / ${decoded.uid || '-'} / ${decoded.answer || '-'}`, 'success')
       setAutoScan(false)

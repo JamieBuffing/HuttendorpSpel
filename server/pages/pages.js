@@ -36,6 +36,10 @@ function normalizeRawRows(rows) {
     .map((row) => String(row || '').replace(/[^01]/g, ''))
 }
 
+function normalizeRawBits(bits) {
+  return String(bits || '').replace(/[^01]/g, '')
+}
+
 function checksum(data) {
   const total = String(data || '')
     .split('')
@@ -80,75 +84,72 @@ function parsePayload(payload) {
   return { postId, uid, cardId: uid, teamId: uid, answer, payload: clean }
 }
 
-function bitFromSample(sample) {
-  if (!sample) return 0
-  const ones = sample.split('').filter((bit) => bit === '1').length
-  return ones >= Math.ceil(sample.length / 2) ? 1 : 0
-}
-
-function decodeRowsWithCandidate(rawRows, payloadLength) {
-  const rows = normalizeRawRows(rawRows)
-  if (rows.length !== 6 || rows.some((row) => row.length < 100)) return null
-
-  const charsPerRow = Math.ceil(payloadLength / 6)
-  const values = []
-
-  for (let rowIndex = 0; rowIndex < 6; rowIndex++) {
-    const remaining = payloadLength - values.length
-    if (remaining <= 0) break
-
-    const charsThisRow = Math.min(charsPerRow, remaining)
-    const bitsThisRow = charsThisRow * 4
-
-    let blockWidth = 3
-    if (bitsThisRow > 36) blockWidth = 2
-    if (bitsThisRow > 56) blockWidth = 1
-
-    const codeWidth = bitsThisRow * blockWidth
-    let startX = Math.floor((128 - codeWidth) / 2)
-    if (startX < 4) startX = 4
-
-    const row = rows[rowIndex]
-
-    for (let charIndex = 0; charIndex < charsThisRow; charIndex++) {
-      let value = 0
-
-      for (let bitIndex = 0; bitIndex < 4; bitIndex++) {
-        const logicalBitIndex = charIndex * 4 + bitIndex
-        const start = startX + logicalBitIndex * blockWidth
-        const sample = row.slice(start, start + blockWidth)
-        value = (value << 1) | bitFromSample(sample)
-      }
-
-      values.push(value)
-    }
-  }
-
-  if (values.length !== payloadLength) return null
+function decodePayloadFromBits(rawBits, payloadLength) {
+  const bits = normalizeRawBits(rawBits)
+  if (bits.length < payloadLength * 4) return null
 
   let payload = ''
-  for (let i = 0; i < values.length; i++) {
-    const char = valueToPayloadChar(values[i], i)
+
+  for (let i = 0; i < payloadLength; i++) {
+    const chunk = bits.slice(i * 4, i * 4 + 4)
+    if (chunk.length !== 4) return null
+
+    const value = parseInt(chunk, 2)
+    const char = valueToPayloadChar(value, i)
     if (!char) return null
+
     payload += char
   }
 
   return parsePayload(payload)
 }
 
-function decodeOledBackupCode({ rawRows, payload }) {
+function bitFromSample(sample) {
+  if (!sample) return 0
+  const ones = sample.split('').filter((bit) => bit === '1').length
+  return ones >= Math.ceil(sample.length / 2) ? 1 : 0
+}
+
+function rawRowsToBitStream(rawRows) {
+  const rows = normalizeRawRows(rawRows)
+  if (rows.length !== 6) return ''
+
+  const DATA_X = 4
+  const DATA_BIT_W = 2
+  const DATA_ROW1_W = 111
+  const DATA_ROW_W = 120
+
+  let bits = ''
+
+  for (let rowIndex = 0; rowIndex < 6; rowIndex++) {
+    const row = rows[rowIndex]
+    const rowWidth = rowIndex === 0 ? DATA_ROW1_W : DATA_ROW_W
+    const cells = Math.floor(rowWidth / DATA_BIT_W)
+
+    if (row.length < DATA_X + rowWidth - 2) return ''
+
+    for (let i = 0; i < cells; i++) {
+      const start = DATA_X + i * DATA_BIT_W
+      bits += bitFromSample(row.slice(start, start + DATA_BIT_W)) ? '1' : '0'
+    }
+  }
+
+  return bits
+}
+
+function decodeOledBackupCode({ rawRows, rawBits, payload }) {
   if (payload) {
     const parsed = parsePayload(payload)
     if (parsed) return parsed
   }
 
-  const rows = normalizeRawRows(rawRows)
-  if (rows.length !== 6) return null
+  const bits = normalizeRawBits(rawBits) || rawRowsToBitStream(rawRows)
+  if (!bits) return null
 
-  // Arduino payload is: P01 + R/G/B + UID + checksum.
-  // Try realistic lengths first, but support very long UID's up to 49 hex chars.
-  for (let payloadLength = 10; payloadLength <= 54; payloadLength++) {
-    const decoded = decodeRowsWithCandidate(rows, payloadLength)
+  // Payload is: P01 + R/G/B + UID + checksum.
+  // Try short to long. Capacity is currently 355 bits = 88 chars.
+  for (let payloadLength = 6; payloadLength <= Math.floor(bits.length / 4); payloadLength++) {
+    const decoded = decodePayloadFromBits(bits, payloadLength)
     if (decoded) return decoded
   }
 
@@ -235,6 +236,7 @@ router.post('/import/scan-code', requireLogin, async (req, res, next) => {
   try {
     const decoded = decodeOledBackupCode({
       rawRows: req.body.rawRows,
+      rawBits: req.body.rawBits,
       payload: req.body.payload
     })
 
