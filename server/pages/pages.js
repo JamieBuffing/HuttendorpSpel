@@ -157,6 +157,7 @@ function decodePixelmapBitString(bitString) {
 
 router.get('/import', requireLogin, (req, res) => {
   res.render('pages/import', {
+<<<<<<< Updated upstream
     result: null,
     error: null,
     zones: PIXELMAP_DATA_ZONES
@@ -189,8 +190,20 @@ router.post('/import/scan-code', requireLogin, async (req, res) => {
   }
 })
 
+=======
+    rawJson: '',
+    parsedCount: 0,
+    results: [],
+    error: null
+  })
+})
+
+>>>>>>> Stashed changes
 router.post('/import', requireLogin, async (req, res) => {
+  const rawJson = String(req.body.json || '')
+
   try {
+<<<<<<< Updated upstream
     const decoded = decodePixelmapBitString(req.body.bitString || req.body.code || '')
     const result = await saveAnswerFromEsp({
       postId: decoded.postId,
@@ -210,7 +223,55 @@ router.post('/import', requireLogin, async (req, res) => {
       result: null,
       error: error.message || 'Code kon niet gelezen worden',
       zones: PIXELMAP_DATA_ZONES
+=======
+    const objects = parseBackupJson(rawJson)
+    const results = []
+
+    for (const item of objects) {
+      results.push(await saveAnswerFromEsp({
+        postId: item.postId || item.id,
+        teamId: item.teamId || item.cardId,
+        cardId: item.cardId || item.teamId,
+        answer: item.answer
+      }))
+    }
+
+    res.render('pages/import', {
+      rawJson,
+      parsedCount: objects.length,
+      results,
+      error: null
     })
+  } catch (error) {
+    res.status(400).render('pages/import', {
+      rawJson,
+      parsedCount: 0,
+      results: [],
+      error: 'Ongeldige JSON. Plak een JSON-array, één JSON-object, of meerdere JSON-objecten onder elkaar.'
+>>>>>>> Stashed changes
+    })
+  }
+})
+
+
+
+router.post('/import/scan-code', requireLogin, async (req, res, next) => {
+  try {
+    const result = await saveAnswerFromEsp({
+      postId: req.body.postId,
+      cardId: req.body.uid,
+      teamId: req.body.uid,
+      answer: req.body.answer,
+      allowOverwrite: false
+    })
+
+    if (!result.ok) {
+      return res.status(result.alreadyAnswered ? 409 : 400).json(result)
+    }
+
+    res.json(result)
+  } catch (error) {
+    next(error)
   }
 })
 

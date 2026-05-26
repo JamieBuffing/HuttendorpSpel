@@ -1,260 +1,243 @@
 <%- include('../partials/page-shell-start', { title: 'Backup import' }); %>
 
-<section class="panel backupImportPanel">
-  <h1>Backup import</h1>
-  <p>Scan de OLED-pixelmapcode van een ESP32-box. Wit is herkenning, blauw/licht is data, zwart is achtergrond.</p>
-
-  <% if (error) { %>
-    <p class="error"><%= error %></p>
-  <% } %>
+<section class="panel">
+  <h1>Backup scanner</h1>
+  <p>Richt de camera op de OLED-code. De scanner leest de vaste witte pixelmap en de blauwe 8×8 databits.</p>
 
   <div class="scannerGrid">
     <div>
-      <div class="videoBox">
-        <video id="video" playsinline muted></video>
-        <canvas id="scanCanvas" width="640" height="360"></canvas>
-        <div class="scanOverlay">Plaats de OLED-code groot en recht in beeld</div>
-      </div>
-
-      <div class="buttonRow">
-        <button class="button" type="button" id="startCamera">Camera starten</button>
-        <button class="button" type="button" id="scanOnce">Scan frame</button>
-        <button class="button secondary" type="button" id="toggleAuto">Auto scan: uit</button>
-      </div>
+      <video id="video" autoplay playsinline muted style="width:100%;max-width:520px;border-radius:16px;background:#000;"></video>
+      <canvas id="canvas" width="640" height="360" style="display:none"></canvas>
+      <canvas id="debug" width="128" height="64" style="width:384px;height:192px;image-rendering:pixelated;background:#000;border:2px solid #444;margin-top:10px;"></canvas>
     </div>
-
-    <div class="statusCard">
-      <h2>Status</h2>
-      <p id="scanStatus">Camera nog niet gestart.</p>
-      <p id="scanDebug" class="helpText"></p>
-      <form method="post" action="/import" class="formStack">
-        <label>Handmatig bitstring plakken
-          <textarea id="manualCode" name="bitString" rows="7" placeholder="010101..."></textarea>
-        </label>
-        <button class="button" type="submit">Handmatig importeren</button>
-      </form>
+    <div>
+      <p id="status" class="helpText">Camera nog niet gestart.</p>
+      <p><strong>Payload:</strong><br><code id="payload">-</code></p>
+      <p><strong>Decode:</strong><br><code id="decoded">-</code></p>
+      <button class="button" type="button" id="startBtn">Start camera</button>
+      <button class="button" type="button" id="scanBtn">Scan frame</button>
+      <button class="button" type="button" id="submitBtn" disabled>Importeer antwoord</button>
     </div>
   </div>
 </section>
 
-<% if (result) { %>
-  <section class="panel">
-    <h2>Import resultaat</h2>
-    <table class="dataTable">
-      <thead>
-        <tr>
-          <th>Status</th>
-          <th>Post</th>
-          <th>UID</th>
-          <th>Antwoord</th>
-          <th>Melding</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><%= result.result?.ok ? 'Opgeslagen' : (result.result?.alreadyAnswered ? 'Al gedaan' : 'Niet opgeslagen') %></td>
-          <td><%= result.decoded?.postId || '-' %></td>
-          <td><%= result.decoded?.uid || '-' %></td>
-          <td><%= result.decoded?.answer || '-' %></td>
-          <td><%= result.result?.questionTitle || result.result?.error || '-' %></td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
-<% } %>
-
-<style>
-  .scannerGrid { display:grid; grid-template-columns: 1.3fr .7fr; gap: 1rem; align-items:start; }
-  .videoBox { position:relative; border: 1px solid rgba(255,255,255,.25); border-radius: 18px; overflow:hidden; background:#000; min-height: 260px; }
-  #video, #scanCanvas { width:100%; display:block; background:#000; }
-  #scanCanvas { position:absolute; inset:0; pointer-events:none; }
-  .scanOverlay { position:absolute; left:5%; right:5%; bottom:1rem; text-align:center; padding:.65rem; border-radius: 999px; background:rgba(0,0,0,.58); color:#86efac; font-weight:700; }
-  .buttonRow { display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1rem; }
-  .statusCard { border:1px solid rgba(255,255,255,.18); border-radius:18px; padding:1rem; }
-  .statusOk { color:#86efac; font-weight:800; }
-  .statusWarn { color:#fbbf24; font-weight:800; }
-  .statusError { color:#f87171; font-weight:800; }
-  @media(max-width: 800px) { .scannerGrid { grid-template-columns:1fr; } }
-</style>
-
 <script>
+const PIXELMAP = `ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ
+ZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZZZZZZ
+ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWWWWWWZZZZZ
+ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWWZZZZZZZZZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZZZZZZZZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZWZZZWZZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZWWZZWWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZZZZZWWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZZZZZWWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWWWWWWWWWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWWWWWWWWWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZZZZZZZZZZWZ
+ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
+ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
+ZWZZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZZWZ
+ZWZZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZZWZ
+ZWZZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZZWZ
+ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
+ZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZ
+ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ`.split('
+');
+const DATA_ROWS = [
+  { x:4, y:4, bits:13 },
+  { x:4, y:13, bits:15 },
+  { x:4, y:22, bits:15 },
+  { x:4, y:31, bits:15 },
+  { x:4, y:40, bits:15 },
+  { x:4, y:49, bits:15 }
+];
+const MAX_BITS = 88;
+let lastDecoded = null;
 const video = document.getElementById('video');
-const canvas = document.getElementById('scanCanvas');
+const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
-const scanStatus = document.getElementById('scanStatus');
-const scanDebug = document.getElementById('scanDebug');
-const manualCode = document.getElementById('manualCode');
-const startCamera = document.getElementById('startCamera');
-const scanOnce = document.getElementById('scanOnce');
-const toggleAuto = document.getElementById('toggleAuto');
-const DATA_ZONES = <%- JSON.stringify(zones) %>;
-let stream = null;
-let autoScan = false;
-let busy = false;
-let lastSubmitAt = 0;
-
-function setStatus(message, type = 'warn') {
-  scanStatus.className = type === 'ok' ? 'statusOk' : type === 'error' ? 'statusError' : 'statusWarn';
-  scanStatus.textContent = message;
+const debug = document.getElementById('debug');
+const dctx = debug.getContext('2d');
+const statusEl = document.getElementById('status');
+const payloadEl = document.getElementById('payload');
+const decodedEl = document.getElementById('decoded');
+const submitBtn = document.getElementById('submitBtn');
+function setStatus(text) { statusEl.textContent = text; }
+function isLit(r,g,b) {
+  const brightness = (r+g+b)/3;
+  const blueBoost = b > 55 && b > r * 0.7 && b > g * 0.7;
+  return brightness > 85 || blueBoost;
 }
-
-function isLitPixel(r, g, b) {
-  const brightness = (r + g + b) / 3;
-  const blueStrong = b > 70 && b > r * 0.75 && b > g * 0.75;
-  return brightness > 85 || blueStrong;
-}
-
-function drawVideoFrame() {
-  if (!video.videoWidth || !video.videoHeight) return null;
-
-  const box = canvas.getBoundingClientRect();
-  const ratio = video.videoWidth / video.videoHeight;
-  let w = canvas.width;
-  let h = Math.round(w / ratio);
-  if (h > canvas.height) { h = canvas.height; w = Math.round(h * ratio); }
-  const x = Math.floor((canvas.width - w) / 2);
-  const y = Math.floor((canvas.height - h) / 2);
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(video, x, y, w, h);
-  return ctx.getImageData(0, 0, canvas.width, canvas.height);
-}
-
-function findLitBoundingBox(image) {
-  let minX = image.width, minY = image.height, maxX = -1, maxY = -1;
-  const data = image.data;
-
-  for (let y = 0; y < image.height; y += 2) {
-    for (let x = 0; x < image.width; x += 2) {
-      const i = (y * image.width + x) * 4;
-      if (isLitPixel(data[i], data[i + 1], data[i + 2])) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
-    }
-  }
-
-  if (maxX < minX || maxY < minY) return null;
-
-  // Beetje marge omdat we met stappen van 2 scannen.
-  minX = Math.max(0, minX - 4); minY = Math.max(0, minY - 4);
-  maxX = Math.min(image.width - 1, maxX + 4); maxY = Math.min(image.height - 1, maxY + 4);
-
-  const w = maxX - minX + 1;
-  const h = maxY - minY + 1;
-  const aspect = w / Math.max(h, 1);
-
-  if (w < 80 || h < 35 || aspect < 1.45 || aspect > 2.55) return null;
-  return { x: minX, y: minY, w, h };
-}
-
-function litRatio(image, x0, y0, w, h) {
-  let lit = 0, total = 0;
-  const data = image.data;
-  const sx = Math.max(0, Math.floor(x0));
-  const sy = Math.max(0, Math.floor(y0));
-  const ex = Math.min(image.width, Math.ceil(x0 + w));
-  const ey = Math.min(image.height, Math.ceil(y0 + h));
-
-  for (let y = sy; y < ey; y++) {
-    for (let x = sx; x < ex; x++) {
-      const i = (y * image.width + x) * 4;
-      if (isLitPixel(data[i], data[i + 1], data[i + 2])) lit++;
+function sampleLit(data, w, h, x, y, ww, hh) {
+  let lit=0,total=0;
+  const x0=Math.max(0, Math.floor(x));
+  const y0=Math.max(0, Math.floor(y));
+  const x1=Math.min(w, Math.ceil(x+ww));
+  const y1=Math.min(h, Math.ceil(y+hh));
+  for(let yy=y0; yy<y1; yy++) {
+    for(let xx=x0; xx<x1; xx++) {
+      const i=(yy*w+xx)*4;
+      if(isLit(data[i],data[i+1],data[i+2])) lit++;
       total++;
     }
   }
-  return total ? lit / total : 0;
+  return total ? lit/total : 0;
 }
-
-function readBitsFromBox(image, box) {
-  let bits = '';
-  for (const z of DATA_ZONES) {
-    for (let col = 0; col < z.w; col++) {
-      const px = box.x + ((z.x + col + 0.5) / 128) * box.w;
-      const py = box.y + ((z.y + 0.5) / 64) * box.h;
-      const pw = Math.max(1, box.w / 128 * 0.9);
-      const ph = Math.max(2, box.h / 64 * (z.h - 1));
-      const ratio = litRatio(image, px - pw / 2, py, pw, ph);
-      bits += ratio > 0.33 ? '1' : '0';
+function findLitBounds(img) {
+  const data=img.data,w=img.width,h=img.height;
+  let minX=w,minY=h,maxX=0,maxY=0,count=0;
+  for(let y=0;y<h;y+=2) {
+    for(let x=0;x<w;x+=2) {
+      const i=(y*w+x)*4;
+      if(isLit(data[i],data[i+1],data[i+2])) {
+        minX=Math.min(minX,x); minY=Math.min(minY,y); maxX=Math.max(maxX,x); maxY=Math.max(maxY,y); count++;
+      }
     }
   }
-  return bits;
+  if(count<50) return null;
+  return {minX,minY,maxX,maxY,count};
 }
-
-function drawDebugBox(box) {
-  ctx.strokeStyle = '#22c55e';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(box.x, box.y, box.w, box.h);
-  for (const z of DATA_ZONES) {
-    ctx.strokeStyle = 'rgba(59,130,246,.8)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(
-      box.x + z.x / 128 * box.w,
-      box.y + z.y / 64 * box.h,
-      z.w / 128 * box.w,
-      z.h / 64 * box.h
-    );
+function hexFromNibble(v) { return v<10 ? String(v) : String.fromCharCode(65+v-10); }
+function checksum(data) {
+  let total=0;
+  for(const ch of data) total += ch.charCodeAt(0);
+  return hexFromNibble(total % 16);
+}
+function bitsToChars(bits) {
+  let out='';
+  for(let i=0;i+3<bits.length;i+=4) {
+    const v=parseInt(bits.slice(i,i+4),2);
+    out += hexFromNibble(v);
   }
+  return out;
 }
-
-async function submitBits(bitString) {
-  if (busy || Date.now() - lastSubmitAt < 1800) return;
-  busy = true;
-  lastSubmitAt = Date.now();
-  manualCode.value = bitString;
-
-  try {
-    const response = await fetch('/import/scan-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bitString })
-    });
-    const json = await response.json();
-    if (!response.ok || !json.ok) throw new Error(json.error || 'Import mislukt');
-
-    if (json.alreadyAnswered) {
-      setStatus('Al gedaan: stond al in de database.', 'ok');
-    } else {
-      setStatus('Backup geïmporteerd: ' + json.decoded.postId + ' / ' + json.decoded.uid + ' / ' + json.decoded.answer, 'ok');
+function decodeChars(chars) {
+  // Zoek langste prefix waarbij volgende teken checksum is; de rest is padding 0.
+  for(let end=chars.length-2; end>=4; end--) {
+    const raw=chars.slice(0,end+1);
+    const check=chars[end+1];
+    const rest=chars.slice(end+2);
+    if(checksum(raw)===check && /^0*$/.test(rest)) {
+      const postId=raw.slice(0,3).toLowerCase();
+      const answer=raw.slice(3,4);
+      const uid=raw.slice(4);
+      if(['R','G','B'].includes(answer) && uid.length>0) {
+        return { postId, answer, uid, payload: raw+check };
+      }
     }
-  } catch (error) {
-    setStatus(error.message || 'Code niet geldig', 'error');
-  } finally {
-    busy = false;
   }
+  return null;
 }
-
+function normalizeAndRead(img) {
+  const bounds=findLitBounds(img);
+  if(!bounds) throw new Error('Geen OLED pixels gevonden');
+  const padX=(bounds.maxX-bounds.minX)*0.03;
+  const padY=(bounds.maxY-bounds.minY)*0.03;
+  const sx=bounds.minX-padX, sy=bounds.minY-padY;
+  const sw=(bounds.maxX-bounds.minX)+padX*2;
+  const sh=(bounds.maxY-bounds.minY)+padY*2;
+  dctx.fillStyle='black'; dctx.fillRect(0,0,128,64);
+  dctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, 128, 64);
+  const norm=dctx.getImageData(0,0,128,64);
+  // Simpele referentiecheck: genoeg W-punten aanwezig
+  let ref=0,refTotal=0;
+  for(let y=0;y<64;y++) {
+    for(let x=0;x<128;x++) {
+      if(PIXELMAP[y][x]==='W') {
+        const ratio=sampleLit(norm.data,128,64,x,y,1,1);
+        if(ratio>0.1) ref++;
+        refTotal++;
+      }
+    }
+  }
+  if(ref/refTotal < 0.35) throw new Error('OLED-rand/hoek niet duidelijk genoeg');
+  let bits='';
+  for(const row of DATA_ROWS) {
+    for(let b=0;b<row.bits;b++) {
+      const ratio=sampleLit(norm.data,128,64,row.x+b*8+1,row.y+1,6,6);
+      bits += ratio > 0.35 ? '1':'0';
+    }
+  }
+  const chars=bitsToChars(bits);
+  const decoded=decodeChars(chars);
+  if(!decoded) throw new Error('Checksum fout of code niet scherp genoeg: '+chars);
+  return decoded;
+}
+async function startCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal:'environment' } }, audio:false });
+  video.srcObject = stream;
+  setStatus('Camera gestart. Richt op de OLED-code en klik scan.');
+}
 function scanFrame() {
-  const image = drawVideoFrame();
-  if (!image) return;
-  const box = findLitBoundingBox(image);
-  if (!box) { setStatus('Geen OLED-code gevonden. Houd hem groter/rechter in beeld.', 'warn'); return; }
-  drawDebugBox(box);
-  const bits = readBitsFromBox(image, box);
-  scanDebug.textContent = 'Box: ' + Math.round(box.w) + '×' + Math.round(box.h) + ' px, bits: ' + bits.length;
-  submitBits(bits);
+  if(!video.videoWidth) throw new Error('Camera nog niet klaar');
+  canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const decoded=normalizeAndRead(img);
+  lastDecoded=decoded;
+  payloadEl.textContent=decoded.payload;
+  decodedEl.textContent=`postId=${decoded.postId} uid=${decoded.uid} answer=${decoded.answer}`;
+  submitBtn.disabled=false;
+  setStatus('Code gelezen. Klik importeer.');
 }
-
-startCamera.addEventListener('click', async () => {
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-    video.srcObject = stream;
-    await video.play();
-    setStatus('Camera gestart. Richt op de OLED-code.', 'ok');
-  } catch (error) {
-    setStatus('Camera starten mislukt: ' + error.message, 'error');
-  }
-});
-
-scanOnce.addEventListener('click', scanFrame);
-toggleAuto.addEventListener('click', () => {
-  autoScan = !autoScan;
-  toggleAuto.textContent = 'Auto scan: ' + (autoScan ? 'aan' : 'uit');
-});
-
-setInterval(() => { if (autoScan && stream) scanFrame(); }, 900);
+async function submitDecoded() {
+  if(!lastDecoded) return;
+  const res=await fetch('/import/scan-code', {
+    method:'POST',
+    headers: { 'Content-Type':'application/json' },
+    body: JSON.stringify(lastDecoded)
+  });
+  const json=await res.json();
+  if(json.ok || json.alreadyAnswered) setStatus(json.alreadyAnswered ? 'Al gedaan / stond al in database.' : 'Geïmporteerd.');
+  else setStatus('Fout: '+(json.error || 'onbekend'));
+}
+document.getElementById('startBtn').addEventListener('click', () => startCamera().catch(e => setStatus(e.message)));
+document.getElementById('scanBtn').addEventListener('click', () => { try { scanFrame(); } catch(e) { setStatus(e.message); } });
+submitBtn.addEventListener('click', () => submitDecoded().catch(e => setStatus(e.message)));
 </script>
 
 <%- include('../partials/page-shell-end'); %>

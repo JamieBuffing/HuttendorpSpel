@@ -74,14 +74,15 @@ async function saveAnswerFromEsp({ postId, cardId, teamId, answer, allowOverwrit
   if (existingProgress && !allowOverwrite) {
     return {
       ok: false,
-      error: 'Vraag al beantwoord',
       alreadyAnswered: true,
+      error: 'Vraag al beantwoord',
       postId: cleanPostId,
       teamId: cleanCardId,
       cardId: cleanCardId,
       teamName: team.name,
-      questionTitle: question.title,
+      answer: existingProgress.selectedAnswer || selectedAnswer,
       existingAnswer: existingProgress.selectedAnswer || null,
+      questionTitle: question.title,
       answeredAt: existingProgress.answeredAt || null
     }
   }
