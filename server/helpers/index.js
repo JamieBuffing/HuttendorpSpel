@@ -65,7 +65,7 @@ async function saveAnswerFromEsp({ postId, cardId, teamId, answer, allowOverwrit
   ])
 
   if (!team) return { ok: false, error: 'Team niet gevonden', postId: cleanPostId, cardId: cleanCardId, answer: selectedAnswer }
-  if (!question) return { ok: false, error: 'Vraag/post niet gevonden', postId: cleanPostId, cardId: cleanCardId, answer: selectedAnswer }
+  if (!question) return { ok: false, error: 'Vraag/post niet gevonden', postId: cleanPostId, cardId: cleanCardId, answer: selectedAnswer, teamName: team.name }
 
   const existingProgress = (team.questionProgress || []).find((item) => {
     return item.type === 'normal' && String(item.questionId) === String(question._id)
@@ -79,7 +79,6 @@ async function saveAnswerFromEsp({ postId, cardId, teamId, answer, allowOverwrit
       postId: cleanPostId,
       teamId: cleanCardId,
       cardId: cleanCardId,
-      answer: selectedAnswer,
       teamName: team.name,
       questionTitle: question.title,
       existingAnswer: existingProgress.selectedAnswer || null,

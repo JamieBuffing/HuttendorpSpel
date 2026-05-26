@@ -29,133 +29,6 @@ function parseBackupJson(raw) {
   }
 }
 
-function normalizeRawRows(rows) {
-  if (!Array.isArray(rows)) return []
-  return rows
-    .slice(0, 6)
-    .map((row) => String(row || '').replace(/[^01]/g, ''))
-}
-
-function normalizeRawBits(bits) {
-  return String(bits || '').replace(/[^01]/g, '')
-}
-
-function checksum(data) {
-  const total = String(data || '')
-    .split('')
-    .reduce((sum, char) => sum + char.charCodeAt(0), 0) % 16
-  return total < 10 ? String(total) : String.fromCharCode(55 + total)
-}
-
-function valueToPayloadChar(value, index) {
-  if (index === 0) return value === 14 ? 'P' : null
-  if (index === 3) {
-    if (value === 11) return 'B'
-    if (value === 12) return 'G'
-    if (value === 13) return 'R'
-    return null
-  }
-  if (value >= 0 && value <= 9) return String(value)
-  if (value >= 10 && value <= 15) return String.fromCharCode(55 + value)
-  return null
-}
-
-function parsePayload(payload) {
-  const clean = String(payload || '')
-    .trim()
-    .toUpperCase()
-    .replace(/[^0-9A-FP RGB]/g, '')
-    .replace(/\s/g, '')
-  if (clean.length < 6) return null
-
-  const data = clean.slice(0, -1)
-  const check = clean.slice(-1)
-  if (checksum(data) !== check) return null
-  if (data[0] !== 'P') return null
-
-  const postId = data.slice(0, 3).toLowerCase()
-  const answer = data[3]
-  const uid = data.slice(4).toUpperCase()
-
-  if (!/^p\d\d$/.test(postId)) return null
-  if (!['R', 'G', 'B'].includes(answer)) return null
-  if (!/^[0-9A-F]+$/.test(uid)) return null
-
-  return { postId, uid, cardId: uid, teamId: uid, answer, payload: clean }
-}
-
-function decodePayloadFromBits(rawBits, payloadLength) {
-  const bits = normalizeRawBits(rawBits)
-  if (bits.length < payloadLength * 4) return null
-
-  let payload = ''
-
-  for (let i = 0; i < payloadLength; i++) {
-    const chunk = bits.slice(i * 4, i * 4 + 4)
-    if (chunk.length !== 4) return null
-
-    const value = parseInt(chunk, 2)
-    const char = valueToPayloadChar(value, i)
-    if (!char) return null
-
-    payload += char
-  }
-
-  return parsePayload(payload)
-}
-
-function bitFromSample(sample) {
-  if (!sample) return 0
-  const ones = sample.split('').filter((bit) => bit === '1').length
-  return ones >= Math.ceil(sample.length / 2) ? 1 : 0
-}
-
-function rawRowsToBitStream(rawRows) {
-  const rows = normalizeRawRows(rawRows)
-  if (rows.length !== 6) return ''
-
-  const DATA_X = 4
-  const DATA_BIT_W = 2
-  const DATA_ROW1_W = 111
-  const DATA_ROW_W = 120
-
-  let bits = ''
-
-  for (let rowIndex = 0; rowIndex < 6; rowIndex++) {
-    const row = rows[rowIndex]
-    const rowWidth = rowIndex === 0 ? DATA_ROW1_W : DATA_ROW_W
-    const cells = Math.floor(rowWidth / DATA_BIT_W)
-
-    if (row.length < DATA_X + rowWidth - 2) return ''
-
-    for (let i = 0; i < cells; i++) {
-      const start = DATA_X + i * DATA_BIT_W
-      bits += bitFromSample(row.slice(start, start + DATA_BIT_W)) ? '1' : '0'
-    }
-  }
-
-  return bits
-}
-
-function decodeOledBackupCode({ rawRows, rawBits, payload }) {
-  if (payload) {
-    const parsed = parsePayload(payload)
-    if (parsed) return parsed
-  }
-
-  const bits = normalizeRawBits(rawBits) || rawRowsToBitStream(rawRows)
-  if (!bits) return null
-
-  // Payload is: P01 + R/G/B + UID + checksum.
-  // Try short to long. Capacity is currently 355 bits = 88 chars.
-  for (let payloadLength = 6; payloadLength <= Math.floor(bits.length / 4); payloadLength++) {
-    const decoded = decodePayloadFromBits(bits, payloadLength)
-    if (decoded) return decoded
-  }
-
-  return null
-}
-
 router.get('/', (req, res) => res.redirect('/dashboard'))
 
 router.get('/login', (req, res) => {
@@ -225,27 +98,74 @@ router.get('/leiding-overzicht', requireLogin, async (req, res, next) => {
   }
 })
 
+const PIXELMAP_DATA_ZONES = [
+  { x: 4, y: 4, w: 111, h: 8 },
+  { x: 4, y: 13, w: 120, h: 8 },
+  { x: 4, y: 22, w: 120, h: 8 },
+  { x: 4, y: 31, w: 120, h: 8 },
+  { x: 4, y: 40, w: 120, h: 8 },
+  { x: 4, y: 49, w: 120, h: 8 }
+]
+
+function barcodeChecksum(data) {
+  let total = 0
+  for (const char of String(data || '')) total += char.charCodeAt(0)
+  const value = total % 16
+  return value < 10 ? String(value) : String.fromCharCode(65 + value - 10)
+}
+
+function hexFromBits(bitString) {
+  const clean = String(bitString || '').replace(/[^01]/g, '')
+  let hex = ''
+
+  for (let i = 0; i + 3 < clean.length; i += 4) {
+    hex += parseInt(clean.slice(i, i + 4), 2).toString(16).toUpperCase()
+  }
+
+  return hex
+}
+
+function decodePixelmapBitString(bitString) {
+  const hex = hexFromBits(bitString)
+
+  if (hex.length < 4) throw new Error('Code is te kort')
+
+  const rawLength = parseInt(hex.slice(0, 2), 16)
+  if (!Number.isFinite(rawLength) || rawLength < 5) throw new Error('Lengte in code is ongeldig')
+
+  const neededLength = 2 + rawLength + 1
+  if (hex.length < neededLength) throw new Error('Code is niet compleet')
+
+  const raw = hex.slice(2, 2 + rawLength)
+  const checksum = hex.slice(2 + rawLength, 2 + rawLength + 1)
+  const expected = barcodeChecksum(raw)
+
+  if (checksum !== expected) {
+    throw new Error(`Checksum klopt niet (${checksum} ≠ ${expected})`)
+  }
+
+  const postId = raw.slice(0, 3).toLowerCase()
+  const answer = raw.slice(3, 4).toUpperCase()
+  const uid = raw.slice(4).toUpperCase()
+
+  if (!postId || !uid || !['R', 'G', 'B'].includes(answer)) {
+    throw new Error('Code bevat geen geldige post, UID of antwoord')
+  }
+
+  return { postId, uid, answer, raw, checksum }
+}
+
 router.get('/import', requireLogin, (req, res) => {
   res.render('pages/import', {
     result: null,
-    error: null
+    error: null,
+    zones: PIXELMAP_DATA_ZONES
   })
 })
 
-router.post('/import/scan-code', requireLogin, async (req, res, next) => {
+router.post('/import/scan-code', requireLogin, async (req, res) => {
   try {
-    const decoded = decodeOledBackupCode({
-      rawRows: req.body.rawRows,
-      rawBits: req.body.rawBits,
-      payload: req.body.payload
-    })
-
-    if (!decoded) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Code niet herkend of checksum klopt niet. Houd het OLED-scherm recht in het kader en probeer opnieuw.'
-      })
-    }
+    const decoded = decodePixelmapBitString(req.body.bitString || '')
 
     const result = await saveAnswerFromEsp({
       postId: decoded.postId,
@@ -256,50 +176,40 @@ router.post('/import/scan-code', requireLogin, async (req, res, next) => {
     })
 
     if (!result.ok && result.alreadyAnswered) {
-      return res.json({
-        ok: true,
-        alreadyAnswered: true,
-        decoded,
-        result,
-        message: 'Antwoord stond al in de database.'
-      })
+      return res.json({ ok: true, alreadyAnswered: true, decoded, result })
     }
 
     if (!result.ok) {
-      return res.status(400).json({ ok: false, decoded, result, error: result.error || 'Import mislukt' })
+      return res.status(400).json({ ok: false, error: result.error || 'Opslaan mislukt', decoded, result })
     }
 
-    res.json({ ok: true, decoded, result, message: 'Backup antwoord opgeslagen.' })
+    res.json({ ok: true, decoded, result })
   } catch (error) {
-    next(error)
+    res.status(400).json({ ok: false, error: error.message || 'Code kon niet gelezen worden' })
   }
 })
 
 router.post('/import', requireLogin, async (req, res) => {
-  const rawJson = String(req.body.json || '')
-
   try {
-    const objects = parseBackupJson(rawJson)
-    const results = []
-
-    for (const item of objects) {
-      results.push(await saveAnswerFromEsp({
-        postId: item.postId || item.id,
-        teamId: item.teamId || item.cardId,
-        cardId: item.cardId || item.teamId,
-        answer: item.answer,
-        allowOverwrite: false
-      }))
-    }
+    const decoded = decodePixelmapBitString(req.body.bitString || req.body.code || '')
+    const result = await saveAnswerFromEsp({
+      postId: decoded.postId,
+      cardId: decoded.uid,
+      teamId: decoded.uid,
+      answer: decoded.answer,
+      allowOverwrite: false
+    })
 
     res.render('pages/import', {
-      result: { legacy: true, results, count: objects.length },
-      error: null
+      result: { decoded, result },
+      error: result.ok || result.alreadyAnswered ? null : result.error,
+      zones: PIXELMAP_DATA_ZONES
     })
   } catch (error) {
     res.status(400).render('pages/import', {
       result: null,
-      error: 'Ongeldige import.'
+      error: error.message || 'Code kon niet gelezen worden',
+      zones: PIXELMAP_DATA_ZONES
     })
   }
 })

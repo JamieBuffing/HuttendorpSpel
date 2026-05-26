@@ -141,7 +141,6 @@ router.post('/questions/:id/delete', requireLogin, async (req, res, next) => {
   }
 })
 
-
 router.post('/api/box/check-card', async (req, res, next) => {
   try {
     const database = await db()
@@ -169,7 +168,6 @@ router.post('/api/box/check-card', async (req, res, next) => {
       uid,
       postId,
       teamId: String(team._id),
-      cardId: team.cardId,
       teamName: team.name,
       questionTitle: question.title,
       alreadyAnswered: Boolean(existingProgress),
@@ -186,7 +184,6 @@ router.post('/api/box/submit-answer', async (req, res, next) => {
     const result = await saveAnswerFromEsp({
       postId: req.body.postId,
       cardId: req.body.uid || req.body.cardId || req.body.teamId,
-      teamId: req.body.teamId || req.body.uid || req.body.cardId,
       answer: req.body.answer,
       allowOverwrite: false
     })

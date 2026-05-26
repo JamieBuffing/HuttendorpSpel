@@ -1,304 +1,260 @@
 <%- include('../partials/page-shell-start', { title: 'Backup import' }); %>
 
-<section class="panel">
+<section class="panel backupImportPanel">
   <h1>Backup import</h1>
-  <p>Scan de OLED-backupcode van een ESP32-box. De scanner zoekt de heldere rand, de L-marker rechtsboven en leest daarna de blauwe dataregels.</p>
+  <p>Scan de OLED-pixelmapcode van een ESP32-box. Wit is herkenning, blauw/licht is data, zwart is achtergrond.</p>
 
   <% if (error) { %>
     <p class="error"><%= error %></p>
   <% } %>
 
-  <div class="backupScannerGrid">
+  <div class="scannerGrid">
     <div>
-      <div class="scannerFrame">
-        <video id="cameraVideo" autoplay playsinline muted></video>
-        <canvas id="workCanvas" width="320" height="180"></canvas>
-        <canvas id="previewCanvas" width="128" height="64"></canvas>
-        <div class="scanGuide"><span>Zoek OLED-rand + L-marker</span></div>
+      <div class="videoBox">
+        <video id="video" playsinline muted></video>
+        <canvas id="scanCanvas" width="640" height="360"></canvas>
+        <div class="scanOverlay">Plaats de OLED-code groot en recht in beeld</div>
       </div>
 
-      <div class="buttonRow" style="margin-top: 1rem; gap: .5rem; flex-wrap: wrap;">
-        <button class="button" type="button" id="startCameraBtn">Camera starten</button>
-        <button class="button secondary" type="button" id="scanOnceBtn">Scan frame</button>
-        <button class="button secondary" type="button" id="toggleAutoBtn">Auto scan: uit</button>
+      <div class="buttonRow">
+        <button class="button" type="button" id="startCamera">Camera starten</button>
+        <button class="button" type="button" id="scanOnce">Scan frame</button>
+        <button class="button secondary" type="button" id="toggleAuto">Auto scan: uit</button>
       </div>
     </div>
 
-    <div class="panel nestedPanel">
+    <div class="statusCard">
       <h2>Status</h2>
-      <p id="scanStatus">Nog niet gescand.</p>
-
-      <h3>Handmatig testen</h3>
-      <p class="helpText">Plak hier eventueel de payload, bijvoorbeeld <code>P01R042A16BAFC2091D</code>.</p>
-      <form id="manualPayloadForm" class="formStack">
-        <label>Payload
-          <input name="payload" id="manualPayload" placeholder="P01R..." autocomplete="off">
+      <p id="scanStatus">Camera nog niet gestart.</p>
+      <p id="scanDebug" class="helpText"></p>
+      <form method="post" action="/import" class="formStack">
+        <label>Handmatig bitstring plakken
+          <textarea id="manualCode" name="bitString" rows="7" placeholder="010101..."></textarea>
         </label>
-        <button class="button" type="submit">Payload importeren</button>
+        <button class="button" type="submit">Handmatig importeren</button>
       </form>
-
-      <h3>Laatste decode</h3>
-      <pre id="debugOutput" class="codeBlock">-</pre>
     </div>
   </div>
 </section>
 
+<% if (result) { %>
+  <section class="panel">
+    <h2>Import resultaat</h2>
+    <table class="dataTable">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Post</th>
+          <th>UID</th>
+          <th>Antwoord</th>
+          <th>Melding</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><%= result.result?.ok ? 'Opgeslagen' : (result.result?.alreadyAnswered ? 'Al gedaan' : 'Niet opgeslagen') %></td>
+          <td><%= result.decoded?.postId || '-' %></td>
+          <td><%= result.decoded?.uid || '-' %></td>
+          <td><%= result.decoded?.answer || '-' %></td>
+          <td><%= result.result?.questionTitle || result.result?.error || '-' %></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+<% } %>
+
 <style>
-  .backupScannerGrid { display: grid; grid-template-columns: minmax(260px, 1.2fr) minmax(260px, .8fr); gap: 1rem; align-items: start; }
-  @media (max-width: 800px) { .backupScannerGrid { grid-template-columns: 1fr; } }
-  .scannerFrame { position: relative; width: min(100%, 720px); aspect-ratio: 16 / 9; background: #050505; border-radius: 16px; overflow: hidden; border: 2px solid rgba(255,255,255,.18); }
-  #cameraVideo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  #workCanvas { display: none; }
-  #previewCanvas { position: absolute; right: .75rem; bottom: .75rem; width: 192px; height: 96px; image-rendering: pixelated; background: #000; border: 2px solid #00ff88; border-radius: 6px; }
-  .scanGuide { position: absolute; left: 10%; right: 10%; top: 18%; bottom: 18%; border: 3px solid #00ff88; box-shadow: 0 0 0 999px rgba(0,0,0,.25); border-radius: 8px; display: flex; align-items: flex-end; justify-content: center; color: #00ff88; font-weight: 700; text-shadow: 0 1px 4px #000; padding-bottom: .4rem; pointer-events: none; }
-  .nestedPanel { margin: 0; }
-  .codeBlock { background: #111; color: #00ff88; padding: .75rem; border-radius: 10px; min-height: 8rem; white-space: pre-wrap; word-break: break-word; }
+  .scannerGrid { display:grid; grid-template-columns: 1.3fr .7fr; gap: 1rem; align-items:start; }
+  .videoBox { position:relative; border: 1px solid rgba(255,255,255,.25); border-radius: 18px; overflow:hidden; background:#000; min-height: 260px; }
+  #video, #scanCanvas { width:100%; display:block; background:#000; }
+  #scanCanvas { position:absolute; inset:0; pointer-events:none; }
+  .scanOverlay { position:absolute; left:5%; right:5%; bottom:1rem; text-align:center; padding:.65rem; border-radius: 999px; background:rgba(0,0,0,.58); color:#86efac; font-weight:700; }
+  .buttonRow { display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1rem; }
+  .statusCard { border:1px solid rgba(255,255,255,.18); border-radius:18px; padding:1rem; }
+  .statusOk { color:#86efac; font-weight:800; }
+  .statusWarn { color:#fbbf24; font-weight:800; }
+  .statusError { color:#f87171; font-weight:800; }
+  @media(max-width: 800px) { .scannerGrid { grid-template-columns:1fr; } }
 </style>
 
 <script>
-  const video = document.getElementById('cameraVideo')
-  const workCanvas = document.getElementById('workCanvas')
-  const workCtx = workCanvas.getContext('2d', { willReadFrequently: true })
-  const previewCanvas = document.getElementById('previewCanvas')
-  const previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true })
-  const startCameraBtn = document.getElementById('startCameraBtn')
-  const scanOnceBtn = document.getElementById('scanOnceBtn')
-  const toggleAutoBtn = document.getElementById('toggleAutoBtn')
-  const scanStatus = document.getElementById('scanStatus')
-  const debugOutput = document.getElementById('debugOutput')
-  const manualPayloadForm = document.getElementById('manualPayloadForm')
-  const manualPayload = document.getElementById('manualPayload')
+const video = document.getElementById('video');
+const canvas = document.getElementById('scanCanvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const scanStatus = document.getElementById('scanStatus');
+const scanDebug = document.getElementById('scanDebug');
+const manualCode = document.getElementById('manualCode');
+const startCamera = document.getElementById('startCamera');
+const scanOnce = document.getElementById('scanOnce');
+const toggleAuto = document.getElementById('toggleAuto');
+const DATA_ZONES = <%- JSON.stringify(zones) %>;
+let stream = null;
+let autoScan = false;
+let busy = false;
+let lastSubmitAt = 0;
 
-  const ROWS = 6
-  const DATA_X = 4
-  const DATA_Y = 9
-  const DATA_ROW_H = 8
-  const DATA_ROW_STEP = 9
-  const DATA_BIT_W = 2
-  const DATA_ROW1_W = 111
-  const DATA_ROW_W = 120
+function setStatus(message, type = 'warn') {
+  scanStatus.className = type === 'ok' ? 'statusOk' : type === 'error' ? 'statusError' : 'statusWarn';
+  scanStatus.textContent = message;
+}
 
-  let autoScan = false
-  let autoTimer = null
-  let stream = null
-  let busy = false
+function isLitPixel(r, g, b) {
+  const brightness = (r + g + b) / 3;
+  const blueStrong = b > 70 && b > r * 0.75 && b > g * 0.75;
+  return brightness > 85 || blueStrong;
+}
 
-  function setStatus(text, type = '') {
-    scanStatus.textContent = text
-    scanStatus.className = type
-  }
+function drawVideoFrame() {
+  if (!video.videoWidth || !video.videoHeight) return null;
 
-  async function startCamera() {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false
-      })
-      video.srcObject = stream
-      setStatus('Camera gestart. Houd de OLED-code recht, groot en scherp in beeld.')
-    } catch (error) {
-      setStatus('Camera starten mislukt: ' + error.message, 'error')
-    }
-  }
+  const box = canvas.getBoundingClientRect();
+  const ratio = video.videoWidth / video.videoHeight;
+  let w = canvas.width;
+  let h = Math.round(w / ratio);
+  if (h > canvas.height) { h = canvas.height; w = Math.round(h * ratio); }
+  const x = Math.floor((canvas.width - w) / 2);
+  const y = Math.floor((canvas.height - h) / 2);
 
-  function getRgb(data, width, x, y) {
-    const idx = (y * width + x) * 4
-    return [data[idx], data[idx + 1], data[idx + 2]]
-  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(video, x, y, w, h);
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
 
-  function isLitRgb(r, g, b, threshold = 85) {
-    const brightness = (r + g + b) / 3
-    const max = Math.max(r, g, b)
-    const blueEnough = b > 55 && b >= r * 0.72 && b >= g * 0.72
-    const brightEnough = brightness > threshold || max > 145
-    return brightEnough || blueEnough
-  }
+function findLitBoundingBox(image) {
+  let minX = image.width, minY = image.height, maxX = -1, maxY = -1;
+  const data = image.data;
 
-  function thresholdForImage(image) {
-    const samples = []
-    for (let y = 0; y < image.height; y += 3) {
-      for (let x = 0; x < image.width; x += 3) {
-        const [r, g, b] = getRgb(image.data, image.width, x, y)
-        samples.push((r + g + b) / 3)
+  for (let y = 0; y < image.height; y += 2) {
+    for (let x = 0; x < image.width; x += 2) {
+      const i = (y * image.width + x) * 4;
+      if (isLitPixel(data[i], data[i + 1], data[i + 2])) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
       }
     }
-    samples.sort((a, b) => a - b)
-    const dark = samples[Math.floor(samples.length * 0.40)] || 0
-    const light = samples[Math.floor(samples.length * 0.96)] || 255
-    return Math.max(42, Math.min(150, (dark + light) / 2))
   }
 
-  function litAt(image, x, y, threshold) {
-    if (x < 0 || y < 0 || x >= image.width || y >= image.height) return false
-    const [r, g, b] = getRgb(image.data, image.width, x, y)
-    return isLitRgb(r, g, b, threshold)
-  }
+  if (maxX < minX || maxY < minY) return null;
 
-  function sampleLitRatio(image, x, y, w, h, threshold) {
-    let lit = 0
-    let total = 0
-    for (let yy = Math.round(y); yy < Math.round(y + h); yy++) {
-      for (let xx = Math.round(x); xx < Math.round(x + w); xx++) {
-        if (xx < 0 || yy < 0 || xx >= image.width || yy >= image.height) continue
-        total++
-        if (litAt(image, xx, yy, threshold)) lit++
-      }
+  // Beetje marge omdat we met stappen van 2 scannen.
+  minX = Math.max(0, minX - 4); minY = Math.max(0, minY - 4);
+  maxX = Math.min(image.width - 1, maxX + 4); maxY = Math.min(image.height - 1, maxY + 4);
+
+  const w = maxX - minX + 1;
+  const h = maxY - minY + 1;
+  const aspect = w / Math.max(h, 1);
+
+  if (w < 80 || h < 35 || aspect < 1.45 || aspect > 2.55) return null;
+  return { x: minX, y: minY, w, h };
+}
+
+function litRatio(image, x0, y0, w, h) {
+  let lit = 0, total = 0;
+  const data = image.data;
+  const sx = Math.max(0, Math.floor(x0));
+  const sy = Math.max(0, Math.floor(y0));
+  const ex = Math.min(image.width, Math.ceil(x0 + w));
+  const ey = Math.min(image.height, Math.ceil(y0 + h));
+
+  for (let y = sy; y < ey; y++) {
+    for (let x = sx; x < ex; x++) {
+      const i = (y * image.width + x) * 4;
+      if (isLitPixel(data[i], data[i + 1], data[i + 2])) lit++;
+      total++;
     }
-    return total ? lit / total : 0
   }
+  return total ? lit / total : 0;
+}
 
-  function findBrightBox(image) {
-    const w = image.width
-    const h = image.height
-    const threshold = thresholdForImage(image)
-    let minX = w, minY = h, maxX = 0, maxY = 0, count = 0
-
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        if (litAt(image, x, y, threshold)) {
-          minX = Math.min(minX, x)
-          minY = Math.min(minY, y)
-          maxX = Math.max(maxX, x)
-          maxY = Math.max(maxY, y)
-          count++
-        }
-      }
+function readBitsFromBox(image, box) {
+  let bits = '';
+  for (const z of DATA_ZONES) {
+    for (let col = 0; col < z.w; col++) {
+      const px = box.x + ((z.x + col + 0.5) / 128) * box.w;
+      const py = box.y + ((z.y + 0.5) / 64) * box.h;
+      const pw = Math.max(1, box.w / 128 * 0.9);
+      const ph = Math.max(2, box.h / 64 * (z.h - 1));
+      const ratio = litRatio(image, px - pw / 2, py, pw, ph);
+      bits += ratio > 0.33 ? '1' : '0';
     }
-
-    if (count < 80) return null
-
-    let boxW = maxX - minX + 1
-    let boxH = maxY - minY + 1
-    const cx = (minX + maxX) / 2
-    const cy = (minY + maxY) / 2
-    const targetRatio = 2
-    const ratio = boxW / Math.max(1, boxH)
-
-    if (ratio > targetRatio) boxH = boxW / targetRatio
-    else boxW = boxH * targetRatio
-
-    boxW *= 1.10
-    boxH *= 1.16
-
-    minX = Math.max(0, Math.round(cx - boxW / 2))
-    maxX = Math.min(w - 1, Math.round(cx + boxW / 2))
-    minY = Math.max(0, Math.round(cy - boxH / 2))
-    maxY = Math.min(h - 1, Math.round(cy + boxH / 2))
-
-    return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, threshold }
   }
+  return bits;
+}
 
-  function normalizeFrameFromCamera() {
-    if (!video.videoWidth || !video.videoHeight) return null
-
-    workCanvas.width = 360
-    workCanvas.height = 202
-    workCtx.drawImage(video, 0, 0, workCanvas.width, workCanvas.height)
-    const image = workCtx.getImageData(0, 0, workCanvas.width, workCanvas.height)
-    const box = findBrightBox(image)
-    if (!box) throw new Error('Geen heldere OLED-rand gevonden')
-
-    previewCtx.imageSmoothingEnabled = false
-    previewCtx.fillStyle = 'black'
-    previewCtx.fillRect(0, 0, 128, 64)
-    previewCtx.drawImage(workCanvas, box.x, box.y, box.w, box.h, 0, 0, 128, 64)
-
-    return previewCtx.getImageData(0, 0, 128, 64)
+function drawDebugBox(box) {
+  ctx.strokeStyle = '#22c55e';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(box.x, box.y, box.w, box.h);
+  for (const z of DATA_ZONES) {
+    ctx.strokeStyle = 'rgba(59,130,246,.8)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(
+      box.x + z.x / 128 * box.w,
+      box.y + z.y / 64 * box.h,
+      z.w / 128 * box.w,
+      z.h / 64 * box.h
+    );
   }
+}
 
-  function markerLooksRight(image) {
-    const threshold = thresholdForImage(image)
-    const topLine = sampleLitRatio(image, 117, 2, 9, 2, threshold)
-    const leftLine = sampleLitRatio(image, 117, 2, 2, 9, threshold)
-    return topLine > 0.38 && leftLine > 0.38
-  }
+async function submitBits(bitString) {
+  if (busy || Date.now() - lastSubmitAt < 1800) return;
+  busy = true;
+  lastSubmitAt = Date.now();
+  manualCode.value = bitString;
 
-  function bitCell(image, x, y, w, h, threshold) {
-    // Data is blauw/licht, achtergrond zwart. We gebruiken een hele cel,
-    // zodat onscherpte en OLED-blooming minder problemen geven.
-    return sampleLitRatio(image, x, y, w, h, threshold) > 0.28 ? '1' : '0'
-  }
-
-  function readBitStreamFromNormalized(image) {
-    const threshold = thresholdForImage(image)
-
-    if (!markerLooksRight(image)) {
-      throw new Error('L-marker rechtsboven niet gevonden. Houd de code rechtop en tik om scherp te stellen.')
-    }
-
-    let bits = ''
-
-    for (let row = 0; row < ROWS; row++) {
-      const rowWidth = row === 0 ? DATA_ROW1_W : DATA_ROW_W
-      const cells = Math.floor(rowWidth / DATA_BIT_W)
-      const y = DATA_Y + row * DATA_ROW_STEP
-
-      for (let i = 0; i < cells; i++) {
-        const x = DATA_X + i * DATA_BIT_W
-        bits += bitCell(image, x, y, DATA_BIT_W, DATA_ROW_H, threshold)
-      }
-    }
-
-    return bits
-  }
-
-  function scanBitsFromFrame() {
-    const normalized = normalizeFrameFromCamera()
-    if (!normalized) return null
-    return readBitStreamFromNormalized(normalized)
-  }
-
-  async function sendToServer(payload) {
+  try {
     const response = await fetch('/import/scan-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    const json = await response.json().catch(() => ({ ok: false, error: 'Ongeldig serverantwoord' }))
-    debugOutput.textContent = JSON.stringify(json, null, 2)
-    if (!response.ok || !json.ok) throw new Error(json.error || 'Import mislukt')
-    return json
-  }
+      body: JSON.stringify({ bitString })
+    });
+    const json = await response.json();
+    if (!response.ok || !json.ok) throw new Error(json.error || 'Import mislukt');
 
-  async function scanOnce() {
-    if (busy) return
-    busy = true
-    try {
-      const rawBits = scanBitsFromFrame()
-      if (!rawBits) throw new Error('Geen codebits gevonden')
-      const json = await sendToServer({ rawBits })
-      const decoded = json.decoded || {}
-      setStatus(`Gelukt: ${decoded.postId || '-'} / ${decoded.uid || '-'} / ${decoded.answer || '-'}`, 'success')
-      setAutoScan(false)
-    } catch (error) {
-      setStatus(error.message, 'error')
-    } finally {
-      busy = false
+    if (json.alreadyAnswered) {
+      setStatus('Al gedaan: stond al in de database.', 'ok');
+    } else {
+      setStatus('Backup geïmporteerd: ' + json.decoded.postId + ' / ' + json.decoded.uid + ' / ' + json.decoded.answer, 'ok');
     }
+  } catch (error) {
+    setStatus(error.message || 'Code niet geldig', 'error');
+  } finally {
+    busy = false;
   }
+}
 
-  function setAutoScan(enabled) {
-    autoScan = enabled
-    toggleAutoBtn.textContent = 'Auto scan: ' + (autoScan ? 'aan' : 'uit')
-    if (autoTimer) clearInterval(autoTimer)
-    autoTimer = null
-    if (autoScan) autoTimer = setInterval(scanOnce, 900)
+function scanFrame() {
+  const image = drawVideoFrame();
+  if (!image) return;
+  const box = findLitBoundingBox(image);
+  if (!box) { setStatus('Geen OLED-code gevonden. Houd hem groter/rechter in beeld.', 'warn'); return; }
+  drawDebugBox(box);
+  const bits = readBitsFromBox(image, box);
+  scanDebug.textContent = 'Box: ' + Math.round(box.w) + '×' + Math.round(box.h) + ' px, bits: ' + bits.length;
+  submitBits(bits);
+}
+
+startCamera.addEventListener('click', async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+    setStatus('Camera gestart. Richt op de OLED-code.', 'ok');
+  } catch (error) {
+    setStatus('Camera starten mislukt: ' + error.message, 'error');
   }
+});
 
-  startCameraBtn.addEventListener('click', startCamera)
-  scanOnceBtn.addEventListener('click', scanOnce)
-  toggleAutoBtn.addEventListener('click', () => setAutoScan(!autoScan))
+scanOnce.addEventListener('click', scanFrame);
+toggleAuto.addEventListener('click', () => {
+  autoScan = !autoScan;
+  toggleAuto.textContent = 'Auto scan: ' + (autoScan ? 'aan' : 'uit');
+});
 
-  manualPayloadForm.addEventListener('submit', async (event) => {
-    event.preventDefault()
-    try {
-      const json = await sendToServer({ payload: manualPayload.value })
-      const decoded = json.decoded || {}
-      setStatus(`Gelukt: ${decoded.postId || '-'} / ${decoded.uid || '-'} / ${decoded.answer || '-'}`, 'success')
-    } catch (error) {
-      setStatus(error.message, 'error')
-    }
-  })
+setInterval(() => { if (autoScan && stream) scanFrame(); }, 900);
 </script>
 
 <%- include('../partials/page-shell-end'); %>
