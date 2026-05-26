@@ -57,7 +57,11 @@ function valueToPayloadChar(value, index) {
 }
 
 function parsePayload(payload) {
-  const clean = String(payload || '').trim().toUpperCase().replace(/[^0-9A-FP RGB]/g, '').replace(/\s/g, '')
+  const clean = String(payload || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^0-9A-FP RGB]/g, '')
+    .replace(/\s/g, '')
   if (clean.length < 6) return null
 
   const data = clean.slice(0, -1)
@@ -76,9 +80,15 @@ function parsePayload(payload) {
   return { postId, uid, cardId: uid, teamId: uid, answer, payload: clean }
 }
 
+function bitFromSample(sample) {
+  if (!sample) return 0
+  const ones = sample.split('').filter((bit) => bit === '1').length
+  return ones >= Math.ceil(sample.length / 2) ? 1 : 0
+}
+
 function decodeRowsWithCandidate(rawRows, payloadLength) {
   const rows = normalizeRawRows(rawRows)
-  if (rows.length !== 6 || rows.some((row) => !row)) return null
+  if (rows.length !== 6 || rows.some((row) => row.length < 100)) return null
 
   const charsPerRow = Math.ceil(payloadLength / 6)
   const values = []
@@ -94,6 +104,10 @@ function decodeRowsWithCandidate(rawRows, payloadLength) {
     if (bitsThisRow > 36) blockWidth = 2
     if (bitsThisRow > 56) blockWidth = 1
 
+    const codeWidth = bitsThisRow * blockWidth
+    let startX = Math.floor((128 - codeWidth) / 2)
+    if (startX < 4) startX = 4
+
     const row = rows[rowIndex]
 
     for (let charIndex = 0; charIndex < charsThisRow; charIndex++) {
@@ -101,11 +115,9 @@ function decodeRowsWithCandidate(rawRows, payloadLength) {
 
       for (let bitIndex = 0; bitIndex < 4; bitIndex++) {
         const logicalBitIndex = charIndex * 4 + bitIndex
-        const start = logicalBitIndex * blockWidth
+        const start = startX + logicalBitIndex * blockWidth
         const sample = row.slice(start, start + blockWidth)
-        const ones = sample.split('').filter((bit) => bit === '1').length
-        const bit = ones >= Math.ceil(Math.max(blockWidth, 1) / 2) ? 1 : 0
-        value = (value << 1) | bit
+        value = (value << 1) | bitFromSample(sample)
       }
 
       values.push(value)
@@ -133,7 +145,9 @@ function decodeOledBackupCode({ rawRows, payload }) {
   const rows = normalizeRawRows(rawRows)
   if (rows.length !== 6) return null
 
-  for (let payloadLength = 6; payloadLength <= 54; payloadLength++) {
+  // Arduino payload is: P01 + R/G/B + UID + checksum.
+  // Try realistic lengths first, but support very long UID's up to 49 hex chars.
+  for (let payloadLength = 10; payloadLength <= 54; payloadLength++) {
     const decoded = decodeRowsWithCandidate(rows, payloadLength)
     if (decoded) return decoded
   }
