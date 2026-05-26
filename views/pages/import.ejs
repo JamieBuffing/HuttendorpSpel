@@ -32,8 +32,8 @@
     <details class="manualFallback">
       <summary>Handmatig testen met 6 bitregels</summary>
       <form method="post" action="/import" class="formStack">
-        <label>6 regels van 16 bits
-          <textarea name="rows" rows="7" placeholder="1110000000011101&#10;0000010000101010&#10;0001011010111010&#10;1111110000100000&#10;1001000100000000&#10;0000000000000000"></textarea>
+        <label>6 regels van bitblokken
+          <textarea name="rows" rows="7" placeholder="111000000001110100000000000000000000&#10;000001000010101000000000000000000000&#10;000101101011101000000000000000000000&#10;111111000010000000000000000000000000&#10;100100010000000000000000000000000000&#10;000000000000000000000000000000000000"></textarea>
         </label>
         <button class="button" type="submit">Handmatig importeren</button>
       </form>
@@ -173,10 +173,17 @@
     for (let row = 0; row < 6; row++) {
       const bits = []
       const yStart = 3 + row * 9
-      for (let bit = 0; bit < 16; bit++) {
+
+      // ESP32 tekent standaard blokken van 3 pixels breed.
+      // We lezen 36 bits per regel = 9 hex-tekens. Dat is ruim genoeg
+      // voor lange UID's, terwijl kortere regels automatisch als 0-padding meekomen.
+      for (let bit = 0; bit < 36; bit++) {
         const xStart = 6 + bit * 3
         let total = 0
         let white = 0
+
+        if (xStart + 2 >= 128) break
+
         for (let yy = yStart; yy < yStart + 7; yy++) {
           for (let xx = xStart; xx < xStart + 3; xx++) {
             total++

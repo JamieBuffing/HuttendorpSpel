@@ -27,42 +27,90 @@ function bitsToNibble(bits) {
   return String(bits || '').split('').reduce((value, bit) => (value << 1) + (bit === '1' ? 1 : 0), 0) & 15
 }
 
+function rowBitsToNibbles(row) {
+  const cleanRow = String(row || '').replace(/[^01]/g, '')
+  if (!cleanRow) return []
+  if (cleanRow.length % 4 !== 0) {
+    throw new Error('Elke coderegel moet uit groepjes van 4 bits bestaan.')
+  }
+
+  const nibbles = []
+  for (let i = 0; i < cleanRow.length; i += 4) {
+    nibbles.push(bitsToNibble(cleanRow.slice(i, i + 4)))
+  }
+  return nibbles
+}
+
+function decodeBackupPayloadNibbles(nibbles) {
+  if (!Array.isArray(nibbles) || nibbles.length < 6) return null
+
+  // Payload uit de ESP32:
+  // P + postnummer(2) + antwoord(R/G/B) + UID(hex, variabele lengte) + checksum + optionele nullen
+  if (nibbles[0] !== 14) return null // P
+
+  const answerMap = { 13: 'R', 12: 'G', 11: 'B' }
+  const answer = answerMap[nibbles[3]]
+  if (!answer) return null
+
+  const postId = `p${nibbleToHex(nibbles[1])}${nibbleToHex(nibbles[2])}`.toLowerCase()
+
+  // Checksumpositie is variabel, omdat UID-lengte variabel is.
+  // We proberen elke mogelijke positie en accepteren alleen als checksum klopt
+  // en alles daarna padding-0 is.
+  for (let checksumIndex = 8; checksumIndex < nibbles.length; checksumIndex++) {
+    const uidNibbles = nibbles.slice(4, checksumIndex)
+    if (uidNibbles.length < 4) continue
+
+    const trailing = nibbles.slice(checksumIndex + 1)
+    if (trailing.some((value) => value !== 0)) continue
+
+    const uid = uidNibbles.map(nibbleToHex).join('').toUpperCase()
+    const checksum = nibbleToHex(nibbles[checksumIndex])
+    const expectedChecksum = checksumHex(`P${postId.slice(1).toUpperCase()}${answer}${uid}`)
+
+    if (checksum === expectedChecksum) {
+      return { postId, uid, answer, checksum }
+    }
+  }
+
+  return null
+}
+
 function decodeBackupRows(rows) {
+  if (typeof rows === 'string') {
+    rows = rows
+      .split('\n')
+      .map((row) => row.trim())
+      .filter(Boolean)
+  }
+
   if (!Array.isArray(rows) || rows.length !== 6) {
     throw new Error('Er zijn exact 6 coderegels nodig.')
   }
 
-  const nibbles = []
-  for (const row of rows) {
-    const cleanRow = String(row || '').replace(/[^01]/g, '')
-    if (cleanRow.length !== 16) {
-      throw new Error('Elke coderegel moet 16 bits bevatten.')
+  const rowNibbles = rows.map(rowBitsToNibbles)
+  const maxWidth = Math.max(...rowNibbles.map((row) => row.length))
+
+  if (maxWidth < 1) {
+    throw new Error('Er zijn geen bits gelezen.')
+  }
+
+  // Nieuwe ESP32-code verdeelt payload over 6 regels, maar de scanner leest per regel
+  // vaak een vaste maximale breedte. Daarom proberen we verschillende regelbreedtes
+  // en zoeken we de combinatie waarvan checksum + padding klopt.
+  for (let width = 1; width <= maxWidth; width++) {
+    const nibbles = []
+    for (const row of rowNibbles) {
+      for (let i = 0; i < width; i++) {
+        nibbles.push(row[i] || 0)
+      }
     }
 
-    for (let i = 0; i < 16; i += 4) {
-      nibbles.push(bitsToNibble(cleanRow.slice(i, i + 4)))
-    }
+    const decoded = decodeBackupPayloadNibbles(nibbles)
+    if (decoded) return decoded
   }
 
-  // Arduino payload-indeling:
-  // positie 0: P, 1-2: postnummer, 3: antwoord, 4-17: UID, 18: checksum, 19-23: padding
-  const postId = `p${nibbleToHex(nibbles[1])}${nibbleToHex(nibbles[2])}`.toLowerCase()
-  const answerMap = { 13: 'R', 12: 'G', 11: 'B' }
-  const answer = answerMap[nibbles[3]]
-
-  if (!answer) {
-    throw new Error('Antwoord kon niet worden gelezen.')
-  }
-
-  const uid = nibbles.slice(4, 18).map(nibbleToHex).join('').toUpperCase()
-  const checksum = nibbleToHex(nibbles[18])
-  const expectedChecksum = checksumHex(`P${postId.slice(1).toUpperCase()}${answer}${uid}`)
-
-  if (checksum !== expectedChecksum) {
-    throw new Error(`Checksum klopt niet. Gelezen: ${checksum}, verwacht: ${expectedChecksum}.`)
-  }
-
-  return { postId, uid, answer, checksum }
+  throw new Error('Backup-code kon niet worden gedecodeerd. Probeer rechter/scherper te scannen.')
 }
 
 router.get('/', (req, res) => res.redirect('/dashboard'))
