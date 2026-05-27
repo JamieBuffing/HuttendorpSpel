@@ -2,7 +2,7 @@
 
 <section class="panel">
   <h1>QR backup scanner</h1>
-  <p>Scan de QR-code op het OLED-scherm. De code heeft dit formaat: <code>P01R042A16BAFC2091</code>.</p>
+  <p>Scan de QR-code op het OLED-scherm. Formaat: <code>P01R042A16BAFC2091</code>.</p>
 
   <% if (error) { %>
     <p class="error"><%= error %></p>
@@ -22,61 +22,83 @@
   <div class="sectionHeader">
     <div>
       <h2>Camera scanner</h2>
-      <p>Richt de camera op de QR-code. Je hoeft geen kader precies te raken; de QR-library zoekt de code zelf.</p>
+      <p>Druk op <strong>Scan code</strong>. Na een veilige scan verschijnt <strong>Opslaan</strong>. Daarna kun je direct de volgende code scannen.</p>
     </div>
   </div>
 
   <div class="scannerControls">
-    <button class="button" id="startScanner" type="button">Camera starten</button>
-    <button class="button secondary" id="stopScanner" type="button" disabled>Stoppen</button>
-    <label class="checkboxLine"><input type="checkbox" id="testOnly" checked> Alleen testen/lezen, nog niet opslaan</label>
+    <button class="button" id="scanBtn" type="button">Scan code</button>
+    <button class="button successButton" id="saveScanBtn" type="button" hidden>Opslaan</button>
+    <button class="button secondary" id="cancelScanBtn" type="button" hidden>Opnieuw scannen</button>
   </div>
 
-  <div class="qrVideoWrap">
+  <div class="qrVideoWrap" id="videoWrap" hidden>
     <video id="qrVideo" muted playsinline></video>
   </div>
 
-  <div class="scanStatus" id="scanStatus">Nog geen scan.</div>
-  <pre class="scanDebug" id="scanDebug"></pre>
+  <div class="scanStatus" id="scanStatus">Druk op “Scan code”.</div>
+
+  <div class="scanResultCard" id="scanResultCard" hidden>
+    <h3>Gevonden code</h3>
+    <p class="bigCode" id="foundCode"></p>
+    <dl>
+      <div><dt>Post</dt><dd id="foundPost"></dd></div>
+      <div><dt>Antwoord</dt><dd id="foundAnswer"></dd></div>
+      <div><dt>UID</dt><dd id="foundUid"></dd></div>
+    </dl>
+  </div>
 </section>
 
 <section class="panel">
   <h2>Handmatig invoeren</h2>
+  <p>Werkt de camera niet? Vul dezelfde code handmatig in en sla hem direct op.</p>
   <form method="post" action="/import" class="gridForm two">
     <label>Code
-      <input name="code" id="manualCode" placeholder="P01R042A16BAFC2091" autocomplete="off">
+      <input name="code" id="manualCode" placeholder="P01R042A16BAFC2091" autocomplete="off" inputmode="text">
     </label>
-    <button class="button" type="submit">Code importeren</button>
+    <button class="button" type="submit">Handmatig opslaan</button>
   </form>
 </section>
 
 <style>
   .qrScannerPanel video { width: 100%; max-height: 70vh; background: #000; border-radius: 16px; object-fit: cover; }
-  .qrVideoWrap { overflow: hidden; border-radius: 16px; border: 1px solid rgba(255,255,255,.15); background:#000; }
+  .qrVideoWrap { overflow: hidden; border-radius: 16px; border: 1px solid rgba(255,255,255,.15); background:#000; margin-top: 12px; }
   .scannerControls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:12px 0; }
-  .checkboxLine { display:flex; align-items:center; gap:8px; }
   .scanStatus { margin-top:12px; padding:12px; border-radius:12px; background:rgba(255,255,255,.08); font-weight:700; }
   .scanStatus.ok { background:rgba(0,180,90,.16); }
   .scanStatus.warn { background:rgba(255,180,0,.18); }
   .scanStatus.error { background:rgba(255,0,0,.14); }
-  .scanDebug { white-space:pre-wrap; overflow-wrap:anywhere; background:rgba(0,0,0,.35); padding:12px; border-radius:12px; min-height:70px; }
+  .scanResultCard { margin-top: 14px; padding: 14px; border-radius: 14px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }
+  .scanResultCard h3 { margin-top: 0; }
+  .bigCode { font-size: clamp(1.1rem, 3vw, 1.7rem); font-weight: 900; letter-spacing: .04em; overflow-wrap: anywhere; }
+  .scanResultCard dl { display: grid; gap: 8px; margin: 0; }
+  .scanResultCard dl div { display: grid; grid-template-columns: 110px 1fr; gap: 10px; }
+  .scanResultCard dt { opacity: .75; }
+  .scanResultCard dd { margin: 0; font-weight: 800; overflow-wrap: anywhere; }
+  .successButton { background: #18a558; }
 </style>
 
 <script type="module">
   import QrScanner from 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.min.js';
 
   const video = document.getElementById('qrVideo');
+  const videoWrap = document.getElementById('videoWrap');
   const statusEl = document.getElementById('scanStatus');
-  const debugEl = document.getElementById('scanDebug');
-  const startBtn = document.getElementById('startScanner');
-  const stopBtn = document.getElementById('stopScanner');
-  const testOnlyEl = document.getElementById('testOnly');
+  const scanBtn = document.getElementById('scanBtn');
+  const saveScanBtn = document.getElementById('saveScanBtn');
+  const cancelScanBtn = document.getElementById('cancelScanBtn');
   const manualCodeEl = document.getElementById('manualCode');
+  const scanResultCard = document.getElementById('scanResultCard');
+  const foundCode = document.getElementById('foundCode');
+  const foundPost = document.getElementById('foundPost');
+  const foundAnswer = document.getElementById('foundAnswer');
+  const foundUid = document.getElementById('foundUid');
 
   let scanner = null;
   let lastCode = '';
   let stableCount = 0;
-  let busy = false;
+  let safeDecoded = null;
+  let saving = false;
 
   function setStatus(text, cls = '') {
     statusEl.textContent = text;
@@ -90,23 +112,46 @@
   function decodeCode(raw) {
     const code = normalizeCode(raw);
     const match = code.match(/^(P\d{2})([RGB])([0-9A-F]{4,32})$/);
-    if (!match) {
-      throw new Error('Ongeldig formaat. Verwacht bijvoorbeeld P01R042A16BAFC2091');
-    }
+    if (!match) throw new Error('Ongeldig formaat. Verwacht bijvoorbeeld P01R042A16BAFC2091');
     return { code, postId: match[1].toLowerCase(), answer: match[2], uid: match[3] };
   }
 
-  async function submitCode(decoded) {
-    const response = await fetch('/import/scan-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: decoded.code, testOnly: testOnlyEl.checked })
-    });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok || !json.ok) {
-      throw new Error(json.error || 'Opslaan is mislukt.');
-    }
-    return json;
+  function showSafeScan(decoded) {
+    safeDecoded = decoded;
+    manualCodeEl.value = decoded.code;
+    foundCode.textContent = decoded.code;
+    foundPost.textContent = decoded.postId;
+    foundAnswer.textContent = decoded.answer;
+    foundUid.textContent = decoded.uid;
+    scanResultCard.hidden = false;
+    scanBtn.hidden = true;
+    saveScanBtn.hidden = false;
+    cancelScanBtn.hidden = false;
+    videoWrap.hidden = true;
+    setStatus('Veilige scan gevonden. Controleer kort en druk op Opslaan.', 'ok');
+  }
+
+  async function stopScannerOnly() {
+    if (!scanner) return;
+    scanner.stop();
+    scanner.destroy();
+    scanner = null;
+  }
+
+  async function resetForNextScan(message = 'Klaar voor de volgende code.') {
+    await stopScannerOnly();
+    lastCode = '';
+    stableCount = 0;
+    safeDecoded = null;
+    saving = false;
+    scanResultCard.hidden = true;
+    videoWrap.hidden = true;
+    scanBtn.hidden = false;
+    scanBtn.disabled = false;
+    saveScanBtn.hidden = true;
+    saveScanBtn.disabled = false;
+    cancelScanBtn.hidden = true;
+    setStatus(message);
   }
 
   async function onScan(result) {
@@ -116,64 +161,61 @@
       decoded = decodeCode(raw);
     } catch (error) {
       setStatus(error.message, 'error');
-      debugEl.textContent = `Gelezen: ${raw || '(leeg)'}`;
       return;
     }
 
     if (decoded.code === lastCode) stableCount += 1;
     else { lastCode = decoded.code; stableCount = 1; }
 
-    manualCodeEl.value = decoded.code;
-    debugEl.textContent = JSON.stringify({ gelezen: decoded.code, postId: decoded.postId, antwoord: decoded.answer, uid: decoded.uid, stabiel: stableCount, testOnly: testOnlyEl.checked }, null, 2);
-
     if (stableCount < 2) {
-      setStatus(`QR gezien: ${decoded.code} — nog 1 stabiele scan nodig`, 'warn');
+      setStatus(`QR gezien: ${decoded.code} — nog 1 veilige scan nodig`, 'warn');
       return;
     }
 
-    if (busy) return;
-    busy = true;
-    try {
-      const saved = await submitCode(decoded);
-      if (testOnlyEl.checked) {
-        setStatus(`TEST OK: ${decoded.code}`, 'ok');
-      } else {
-        setStatus(saved.alreadyAnswered ? `Al bekend: ${decoded.code}` : `Opgeslagen: ${decoded.code}`, 'ok');
-      }
-    } catch (error) {
-      setStatus(error.message, 'error');
-    } finally {
-      setTimeout(() => { busy = false; stableCount = 0; lastCode = ''; }, 900);
-    }
+    await stopScannerOnly();
+    showSafeScan(decoded);
   }
 
   async function startScanner() {
-    if (scanner) return;
+    await resetForNextScan('Camera wordt gestart...');
+    scanBtn.disabled = true;
+    videoWrap.hidden = false;
     scanner = new QrScanner(video, onScan, {
       preferredCamera: 'environment',
       returnDetailedScanResult: true,
       highlightScanRegion: true,
       highlightCodeOutline: true,
-      maxScansPerSecond: 8
+      maxScansPerSecond: 10
     });
     await scanner.start();
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
     setStatus('Camera actief. Richt op de OLED QR-code.');
   }
 
-  function stopScanner() {
-    if (!scanner) return;
-    scanner.stop();
-    scanner.destroy();
-    scanner = null;
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    setStatus('Scanner gestopt.');
+  async function saveSafeScan() {
+    if (!safeDecoded || saving) return;
+    saving = true;
+    saveScanBtn.disabled = true;
+    setStatus('Opslaan...', 'warn');
+
+    try {
+      const response = await fetch('/import/scan-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: safeDecoded.code })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) throw new Error(json.error || 'Opslaan is mislukt.');
+      await resetForNextScan(json.alreadyAnswered ? `Al bekend: ${safeDecoded.code}` : `Opgeslagen: ${safeDecoded.code}`);
+    } catch (error) {
+      saving = false;
+      saveScanBtn.disabled = false;
+      setStatus(error.message || 'Opslaan is mislukt.', 'error');
+    }
   }
 
-  startBtn.addEventListener('click', () => startScanner().catch(error => setStatus(error.message || 'Camera starten mislukt.', 'error')));
-  stopBtn.addEventListener('click', stopScanner);
+  scanBtn.addEventListener('click', () => startScanner().catch(error => resetForNextScan(error.message || 'Camera starten mislukt.')));
+  saveScanBtn.addEventListener('click', saveSafeScan);
+  cancelScanBtn.addEventListener('click', () => resetForNextScan('Scan geannuleerd. Druk op “Scan code” voor een nieuwe scan.'));
 </script>
 
 <%- include('../partials/page-shell-end'); %>
