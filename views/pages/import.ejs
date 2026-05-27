@@ -14,6 +14,7 @@
       <div class="scannerOverlay">
         <div class="scannerFrame">
           <div class="scannerGrid"></div>
+          <div class="scannerHint">ongeveer hier is genoeg</div>
         </div>
       </div>
       <canvas id="scanCanvas" width="128" height="64" hidden></canvas>
@@ -31,7 +32,7 @@
     </label>
 
     <p class="helpText">
-      Houd de OLED zo groot mogelijk precies binnen het groene kader. Het scherm moet horizontaal staan: 128 breed en 64 hoog.
+      Houd de OLED ongeveer recht en goed zichtbaar in beeld. Hij hoeft niet meer precies in het kader: de scanner zoekt zelf meerdere posities en groottes.
     </p>
 
     <div id="scanMessage" class="scannerMessage">Nog niet gescand.</div>
@@ -91,19 +92,21 @@
     position: relative;
     width: 86%;
     aspect-ratio: 2 / 1;
-    border: 3px solid #00ff88;
+    border: 3px dashed #00ff88;
     border-radius: 8px;
-    box-shadow: 0 0 0 999px rgba(0,0,0,.30);
+    box-shadow: 0 0 0 999px rgba(0,0,0,.18);
     overflow: hidden;
   }
   .scannerGrid {
     position: absolute;
     inset: 0;
+    opacity: .55;
     background-image:
       linear-gradient(to right, rgba(0,255,136,.22) 1px, transparent 1px),
       linear-gradient(to bottom, rgba(0,255,136,.22) 1px, transparent 1px);
     background-size: 6.25% 12.5%;
   }
+  .scannerHint { position: absolute; left: 0; right: 0; bottom: .35rem; text-align: center; color: #00ff88; font-size: .85rem; font-weight: 800; text-shadow: 0 1px 4px #000; }
   .scannerControls { display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center; }
   .dryRunToggle { display: flex; gap: .5rem; align-items: center; justify-content: center; font-weight: 700; }
   .scannerMessage { padding: .9rem 1rem; border-radius: 12px; background: #111; color: #fff; text-align: center; font-weight: 700; }
@@ -207,41 +210,60 @@
       startBtn.disabled = true
       stableRows = ''
       stableCount = 0
-      setMessage('Camera gestart. Vul het groene kader met de OLED-code.', 'busy')
+      setMessage('Camera gestart. Houd de OLED ongeveer recht en duidelijk in beeld.', 'busy')
       scanTimer = window.setInterval(scanAndMaybeSubmit, 350)
     } catch (error) {
       setMessage('Camera kon niet starten: ' + (error.message || error), 'error')
     }
   }
 
-  function getCenterCrop(videoWidth, videoHeight) {
-    const targetRatio = 2
-    let cropWidth = videoWidth
-    let cropHeight = Math.round(cropWidth / targetRatio)
-
-    if (cropHeight > videoHeight) {
-      cropHeight = videoHeight
-      cropWidth = Math.round(cropHeight * targetRatio)
-    }
-
-    // Deze crop hoort bij het groene kader. Het kader is 86% van de kleinste 2:1 crop,
-    // dus we pakken bewust iets kleiner dan het volledige camerabeeld.
-    const frameScale = 0.86
-    cropWidth = Math.round(cropWidth * frameScale)
-    cropHeight = Math.round(cropHeight * frameScale)
-
-    return {
-      x: Math.floor((videoWidth - cropWidth) / 2),
-      y: Math.floor((videoHeight - cropHeight) / 2),
-      width: cropWidth,
-      height: cropHeight
-    }
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value))
   }
 
-  function readRowsFromFrame() {
-    if (!video.videoWidth || !video.videoHeight) return null
+  function hamming(a, b) {
+    if (!a || !b || a.length !== b.length) return 999
+    let errors = 0
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) errors++
+    return errors
+  }
 
-    const crop = getCenterCrop(video.videoWidth, video.videoHeight)
+  function buildCandidateCrops(videoWidth, videoHeight) {
+    const targetRatio = 2
+    let baseWidth = videoWidth
+    let baseHeight = Math.round(baseWidth / targetRatio)
+
+    if (baseHeight > videoHeight) {
+      baseHeight = videoHeight
+      baseWidth = Math.round(baseHeight * targetRatio)
+    }
+
+    const centerX = videoWidth / 2
+    const centerY = videoHeight / 2
+    const scales = [0.96, 0.86, 0.76, 0.66, 0.56]
+    const xOffsets = [0, -0.10, 0.10, -0.20, 0.20]
+    const yOffsets = [0, -0.10, 0.10, -0.20, 0.20]
+    const candidates = []
+
+    for (const scale of scales) {
+      const width = Math.round(baseWidth * scale)
+      const height = Math.round(width / targetRatio)
+      for (const oy of yOffsets) {
+        for (const ox of xOffsets) {
+          const cx = centerX + ox * baseWidth
+          const cy = centerY + oy * baseHeight
+          const x = clamp(Math.round(cx - width / 2), 0, videoWidth - width)
+          const y = clamp(Math.round(cy - height / 2), 0, videoHeight - height)
+          candidates.push({ x, y, width, height, scale, ox, oy })
+        }
+      }
+    }
+
+    // Grootste/middelste crops eerst. Bij gelijke score voelt dat stabieler.
+    return candidates
+  }
+
+  function readRowsFromCrop(crop) {
     ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, 128, 64)
 
     const image = ctx.getImageData(0, 0, 128, 64)
@@ -256,12 +278,9 @@
         const r = data[i]
         const g = data[i + 1]
         const b = data[i + 2]
-
-        // Blauwe OLED: blauw kanaal is belangrijker dan standaard wit-helderheid.
         const brightness = r * 0.299 + g * 0.587 + b * 0.114
         const blueBoostedSignal = Math.max(brightness, b * 0.95)
         signal[y][x] = blueBoostedSignal
-
         if (x % 2 === 0 && y % 2 === 0) samples.push(blueBoostedSignal)
       }
     }
@@ -269,7 +288,8 @@
     samples.sort((a, b) => a - b)
     const low = samples[Math.floor(samples.length * 0.18)] || 0
     const high = samples[Math.floor(samples.length * 0.92)] || 255
-    const threshold = Math.max(28, low + (high - low) * 0.48)
+    const contrast = high - low
+    const threshold = Math.max(24, low + contrast * 0.48)
 
     const rows = []
     for (let row = 0; row < HUTTO_ROWS; row++) {
@@ -280,7 +300,6 @@
         let total = 0
         let on = 0
 
-        // Alleen het midden van elk 8×8 vak meten. Dat voorkomt fouten door blur/bloom aan de rand.
         for (let yy = y0; yy < y0 + 4; yy++) {
           for (let xx = x0; xx < x0 + 4; xx++) {
             total++
@@ -293,8 +312,38 @@
       rows.push(line)
     }
 
-    setDebug(rows)
-    return rows
+    const topErrors = hamming(rows[0], TOP_FINDER)
+    const bottomErrors = hamming(rows[7], BOTTOM_FINDER)
+    const finderErrors = topErrors + bottomErrors
+
+    // Finder is het belangrijkste. Contrast helpt alleen om slechte donkere crops te vermijden.
+    const score = (32 - finderErrors * 4) + Math.min(12, contrast / 8)
+    return { rows, crop, score, finderErrors, topErrors, bottomErrors, contrast }
+  }
+
+  function readRowsFromFrame() {
+    if (!video.videoWidth || !video.videoHeight) return null
+
+    const candidates = buildCandidateCrops(video.videoWidth, video.videoHeight)
+    let best = null
+
+    for (const crop of candidates) {
+      const result = readRowsFromCrop(crop)
+      if (!best || result.score > best.score) best = result
+
+      // Exacte finder gevonden: genoeg, nu niet onnodig 100 extra crops proberen.
+      if (result.finderErrors === 0 && result.contrast > 18) {
+        best = result
+        break
+      }
+    }
+
+    if (best) {
+      setDebug(best.rows)
+      debugRows.textContent = best.rows.join('\n') + `\n\nfinder-fouten: ${best.finderErrors}\ncontrast: ${Math.round(best.contrast)}\npositie: ${Math.round(best.crop.x)},${Math.round(best.crop.y)} ${Math.round(best.crop.width)}×${Math.round(best.crop.height)}`
+    }
+
+    return best
   }
 
   function finderLooksValid(rows) {
@@ -330,9 +379,10 @@
 
   async function scanAndMaybeSubmit() {
     try {
-      const rows = readRowsFromFrame()
-      if (!rows) return
+      const scan = readRowsFromFrame()
+      if (!scan) return
 
+      const rows = scan.rows
       const key = rows.join('|')
       if (key === stableRows) {
         stableCount++
@@ -342,7 +392,7 @@
       }
 
       if (!finderLooksValid(rows)) {
-        setMessage('Zoek de code: bovenste/onderste herkenningsrij nog niet goed in beeld.', 'busy')
+        setMessage(`Code wordt gezocht... beste poging heeft nog ${scan.finderErrors} finder-fout(en). Houd hem ongeveer recht en iets dichterbij.`, 'busy')
         return
       }
 
