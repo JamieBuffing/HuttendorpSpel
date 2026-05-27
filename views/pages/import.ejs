@@ -2,242 +2,263 @@
 
 <section class="panel">
   <h1>Backup scanner</h1>
-  <p>Richt de camera op de OLED-code. De scanner leest de vaste witte pixelmap en de blauwe 8×8 databits.</p>
+  <p>Richt de camera op het OLED-scherm. Zorg dat de code recht en groot in het kader staat.</p>
 
-  <div class="scannerGrid">
-    <div>
-      <video id="video" autoplay playsinline muted style="width:100%;max-width:520px;border-radius:16px;background:#000;"></video>
-      <canvas id="canvas" width="640" height="360" style="display:none"></canvas>
-      <canvas id="debug" width="128" height="64" style="width:384px;height:192px;image-rendering:pixelated;background:#000;border:2px solid #444;margin-top:10px;"></canvas>
+  <% if (error) { %>
+    <p class="error"><%= error %></p>
+  <% } %>
+
+  <div class="backupScanner">
+    <div class="videoWrap">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="scanFrame">
+        <span>OLED in dit vak</span>
+      </div>
     </div>
-    <div>
-      <p id="status" class="helpText">Camera nog niet gestart.</p>
-      <p><strong>Payload:</strong><br><code id="payload">-</code></p>
-      <p><strong>Decode:</strong><br><code id="decoded">-</code></p>
-      <button class="button" type="button" id="startBtn">Start camera</button>
-      <button class="button" type="button" id="scanBtn">Scan frame</button>
-      <button class="button" type="button" id="submitBtn" disabled>Importeer antwoord</button>
+
+    <div class="buttonRow">
+      <button class="button" type="button" id="startCamera">Camera starten</button>
+      <button class="button" type="button" id="scanOnce">Scan één keer</button>
+      <button class="button secondary" type="button" id="toggleLoop">Auto scan: uit</button>
     </div>
+
+    <p id="scanStatus" class="helpText">Nog niet gescand.</p>
+
+    <canvas id="workCanvas" width="128" height="64" hidden></canvas>
   </div>
 </section>
 
+<section class="panel">
+  <h2>Laatste resultaat</h2>
+  <pre id="resultBox" style="white-space:pre-wrap;word-break:break-word;">Geen resultaat.</pre>
+</section>
+
+<style>
+.backupScanner .videoWrap{
+  position:relative;
+  width:min(680px,100%);
+  margin:0 auto 1rem;
+  background:#000;
+  border-radius:16px;
+  overflow:hidden;
+}
+.backupScanner video{
+  display:block;
+  width:100%;
+  min-height:260px;
+  background:#000;
+}
+.scanFrame{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:82%;
+  aspect-ratio:2/1;
+  transform:translate(-50%,-50%);
+  border:3px solid rgba(255,255,255,.95);
+  box-shadow:0 0 0 999px rgba(0,0,0,.30);
+  border-radius:8px;
+  pointer-events:none;
+}
+.scanFrame span{
+  position:absolute;
+  left:50%;
+  bottom:-2rem;
+  transform:translateX(-50%);
+  font-size:.9rem;
+  color:#fff;
+  background:rgba(0,0,0,.65);
+  padding:.25rem .5rem;
+  border-radius:.5rem;
+  white-space:nowrap;
+}
+.buttonRow{
+  display:flex;
+  flex-wrap:wrap;
+  gap:.75rem;
+  justify-content:center;
+}
+.secondary{opacity:.85}
+</style>
+
 <script>
-const PIXELMAP = `ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ
-ZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZZZZZZ
-ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWWWWWWZZZZZ
-ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWWZZZZZZZZZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZZZZZZZZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZWZZZWZZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZWWZZWWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZZZZZWWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWZZZZZZWWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWWWWWWWWWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWWWWWWWWWWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZZZZZZZZZZWZ
-ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBZZWZ
-ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
-ZWZZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZZWZ
-ZWZZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZZWZ
-ZWZZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZZWZ
-ZWZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZWZ
-ZWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWZ
-ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ`.split('
-');
-const DATA_ROWS = [
-  { x:4, y:4, bits:13 },
-  { x:4, y:13, bits:15 },
-  { x:4, y:22, bits:15 },
-  { x:4, y:31, bits:15 },
-  { x:4, y:40, bits:15 },
-  { x:4, y:49, bits:15 }
-];
-const MAX_BITS = 88;
-let lastDecoded = null;
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d', { willReadFrequently: true });
-const debug = document.getElementById('debug');
-const dctx = debug.getContext('2d');
-const statusEl = document.getElementById('status');
-const payloadEl = document.getElementById('payload');
-const decodedEl = document.getElementById('decoded');
-const submitBtn = document.getElementById('submitBtn');
-function setStatus(text) { statusEl.textContent = text; }
-function isLit(r,g,b) {
-  const brightness = (r+g+b)/3;
-  const blueBoost = b > 55 && b > r * 0.7 && b > g * 0.7;
-  return brightness > 85 || blueBoost;
-}
-function sampleLit(data, w, h, x, y, ww, hh) {
-  let lit=0,total=0;
-  const x0=Math.max(0, Math.floor(x));
-  const y0=Math.max(0, Math.floor(y));
-  const x1=Math.min(w, Math.ceil(x+ww));
-  const y1=Math.min(h, Math.ceil(y+hh));
-  for(let yy=y0; yy<y1; yy++) {
-    for(let xx=x0; xx<x1; xx++) {
-      const i=(yy*w+xx)*4;
-      if(isLit(data[i],data[i+1],data[i+2])) lit++;
-      total++;
-    }
+(() => {
+  const video = document.getElementById('video')
+  const canvas = document.getElementById('workCanvas')
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  const startCameraBtn = document.getElementById('startCamera')
+  const scanOnceBtn = document.getElementById('scanOnce')
+  const toggleLoopBtn = document.getElementById('toggleLoop')
+  const scanStatus = document.getElementById('scanStatus')
+  const resultBox = document.getElementById('resultBox')
+
+  let stream = null
+  let loopEnabled = false
+  let loopTimer = null
+
+  const DATA_ROWS = [
+    { x: 4, y: 4, bits: 13 },
+    { x: 4, y: 13, bits: 15 },
+    { x: 4, y: 22, bits: 15 },
+    { x: 4, y: 31, bits: 15 },
+    { x: 4, y: 40, bits: 15 },
+    { x: 4, y: 49, bits: 15 }
+  ]
+
+  function setStatus(text, ok = null) {
+    scanStatus.textContent = text
+    scanStatus.className = ok === true ? 'helpText success' : ok === false ? 'helpText error' : 'helpText'
   }
-  return total ? lit/total : 0;
-}
-function findLitBounds(img) {
-  const data=img.data,w=img.width,h=img.height;
-  let minX=w,minY=h,maxX=0,maxY=0,count=0;
-  for(let y=0;y<h;y+=2) {
-    for(let x=0;x<w;x+=2) {
-      const i=(y*w+x)*4;
-      if(isLit(data[i],data[i+1],data[i+2])) {
-        minX=Math.min(minX,x); minY=Math.min(minY,y); maxX=Math.max(maxX,x); maxY=Math.max(maxY,y); count++;
+
+  async function startCamera() {
+    if (stream) return
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    })
+
+    video.srcObject = stream
+    await video.play()
+    setStatus('Camera gestart. Houd het OLED-scherm in het kader.')
+  }
+
+  function cropVideoToOledCanvas() {
+    if (!video.videoWidth || !video.videoHeight) {
+      throw new Error('Camera is nog niet klaar')
+    }
+
+    const vw = video.videoWidth
+    const vh = video.videoHeight
+    const wantedRatio = 2
+    let sw = vw
+    let sh = Math.round(vw / wantedRatio)
+
+    if (sh > vh) {
+      sh = vh
+      sw = Math.round(vh * wantedRatio)
+    }
+
+    const sx = Math.floor((vw - sw) / 2)
+    const sy = Math.floor((vh - sh) / 2)
+
+    ctx.imageSmoothingEnabled = false
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, 128, 64)
+
+    return ctx.getImageData(0, 0, 128, 64)
+  }
+
+  function pixelScore(r, g, b) {
+    const brightness = (r + g + b) / 3
+    const blueScore = b * 1.25 + g * 0.35 - r * 0.25
+    return Math.max(brightness, blueScore)
+  }
+
+  function sampleBlock(imageData, x, y, w, h) {
+    let total = 0
+    let count = 0
+
+    for (let yy = y; yy < y + h; yy++) {
+      for (let xx = x; xx < x + w; xx++) {
+        if (xx < 0 || yy < 0 || xx >= 128 || yy >= 64) continue
+        const i = (yy * 128 + xx) * 4
+        total += pixelScore(imageData.data[i], imageData.data[i + 1], imageData.data[i + 2])
+        count++
       }
     }
+
+    return count ? total / count : 0
   }
-  if(count<50) return null;
-  return {minX,minY,maxX,maxY,count};
-}
-function hexFromNibble(v) { return v<10 ? String(v) : String.fromCharCode(65+v-10); }
-function checksum(data) {
-  let total=0;
-  for(const ch of data) total += ch.charCodeAt(0);
-  return hexFromNibble(total % 16);
-}
-function bitsToChars(bits) {
-  let out='';
-  for(let i=0;i+3<bits.length;i+=4) {
-    const v=parseInt(bits.slice(i,i+4),2);
-    out += hexFromNibble(v);
-  }
-  return out;
-}
-function decodeChars(chars) {
-  // Zoek langste prefix waarbij volgende teken checksum is; de rest is padding 0.
-  for(let end=chars.length-2; end>=4; end--) {
-    const raw=chars.slice(0,end+1);
-    const check=chars[end+1];
-    const rest=chars.slice(end+2);
-    if(checksum(raw)===check && /^0*$/.test(rest)) {
-      const postId=raw.slice(0,3).toLowerCase();
-      const answer=raw.slice(3,4);
-      const uid=raw.slice(4);
-      if(['R','G','B'].includes(answer) && uid.length>0) {
-        return { postId, answer, uid, payload: raw+check };
+
+  function readBitsFromImage(imageData) {
+    const bits = []
+    const scores = []
+
+    for (const row of DATA_ROWS) {
+      for (let i = 0; i < row.bits; i++) {
+        const score = sampleBlock(imageData, row.x + i * 8 + 1, row.y + 1, 6, 6)
+        scores.push(score)
       }
     }
+
+    const sorted = scores.slice().sort((a, b) => a - b)
+    const low = sorted[Math.floor(sorted.length * 0.20)] || 0
+    const high = sorted[Math.floor(sorted.length * 0.80)] || 255
+    const threshold = (low + high) / 2
+
+    for (const score of scores) bits.push(score >= threshold ? '1' : '0')
+
+    return { bits: bits.join(''), threshold, low, high }
   }
-  return null;
-}
-function normalizeAndRead(img) {
-  const bounds=findLitBounds(img);
-  if(!bounds) throw new Error('Geen OLED pixels gevonden');
-  const padX=(bounds.maxX-bounds.minX)*0.03;
-  const padY=(bounds.maxY-bounds.minY)*0.03;
-  const sx=bounds.minX-padX, sy=bounds.minY-padY;
-  const sw=(bounds.maxX-bounds.minX)+padX*2;
-  const sh=(bounds.maxY-bounds.minY)+padY*2;
-  dctx.fillStyle='black'; dctx.fillRect(0,0,128,64);
-  dctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, 128, 64);
-  const norm=dctx.getImageData(0,0,128,64);
-  // Simpele referentiecheck: genoeg W-punten aanwezig
-  let ref=0,refTotal=0;
-  for(let y=0;y<64;y++) {
-    for(let x=0;x<128;x++) {
-      if(PIXELMAP[y][x]==='W') {
-        const ratio=sampleLit(norm.data,128,64,x,y,1,1);
-        if(ratio>0.1) ref++;
-        refTotal++;
-      }
+
+  async function submitBits(bits) {
+    const response = await fetch('/import/scan-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bits })
+    })
+
+    const data = await response.json().catch(() => ({ ok: false, error: 'Ongeldig serverantwoord' }))
+
+    resultBox.textContent = JSON.stringify(data, null, 2)
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || 'Scan/import mislukt')
+    }
+
+    return data
+  }
+
+  async function scanOnce() {
+    await startCamera()
+    const imageData = cropVideoToOledCanvas()
+    const read = readBitsFromImage(imageData)
+
+    setStatus(`Bits gelezen. Threshold ${Math.round(read.threshold)}. Uploaden...`)
+
+    const result = await submitBits(read.bits)
+    const decoded = result.decoded || {}
+    const importResult = result.importResult || {}
+
+    if (result.alreadyAnswered) {
+      setStatus(`Al gedaan: ${importResult.teamName || decoded.uid || ''}`, true)
+    } else {
+      setStatus(`Geïmporteerd: ${importResult.teamName || decoded.uid || ''} ${decoded.answer || ''}`, true)
     }
   }
-  if(ref/refTotal < 0.35) throw new Error('OLED-rand/hoek niet duidelijk genoeg');
-  let bits='';
-  for(const row of DATA_ROWS) {
-    for(let b=0;b<row.bits;b++) {
-      const ratio=sampleLit(norm.data,128,64,row.x+b*8+1,row.y+1,6,6);
-      bits += ratio > 0.35 ? '1':'0';
+
+  async function safeScanOnce() {
+    try {
+      await scanOnce()
+      return true
+    } catch (error) {
+      setStatus(error.message || 'Scan mislukt', false)
+      return false
     }
   }
-  const chars=bitsToChars(bits);
-  const decoded=decodeChars(chars);
-  if(!decoded) throw new Error('Checksum fout of code niet scherp genoeg: '+chars);
-  return decoded;
-}
-async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal:'environment' } }, audio:false });
-  video.srcObject = stream;
-  setStatus('Camera gestart. Richt op de OLED-code en klik scan.');
-}
-function scanFrame() {
-  if(!video.videoWidth) throw new Error('Camera nog niet klaar');
-  canvas.width=video.videoWidth; canvas.height=video.videoHeight;
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
-  const img=ctx.getImageData(0,0,canvas.width,canvas.height);
-  const decoded=normalizeAndRead(img);
-  lastDecoded=decoded;
-  payloadEl.textContent=decoded.payload;
-  decodedEl.textContent=`postId=${decoded.postId} uid=${decoded.uid} answer=${decoded.answer}`;
-  submitBtn.disabled=false;
-  setStatus('Code gelezen. Klik importeer.');
-}
-async function submitDecoded() {
-  if(!lastDecoded) return;
-  const res=await fetch('/import/scan-code', {
-    method:'POST',
-    headers: { 'Content-Type':'application/json' },
-    body: JSON.stringify(lastDecoded)
-  });
-  const json=await res.json();
-  if(json.ok || json.alreadyAnswered) setStatus(json.alreadyAnswered ? 'Al gedaan / stond al in database.' : 'Geïmporteerd.');
-  else setStatus('Fout: '+(json.error || 'onbekend'));
-}
-document.getElementById('startBtn').addEventListener('click', () => startCamera().catch(e => setStatus(e.message)));
-document.getElementById('scanBtn').addEventListener('click', () => { try { scanFrame(); } catch(e) { setStatus(e.message); } });
-submitBtn.addEventListener('click', () => submitDecoded().catch(e => setStatus(e.message)));
+
+  function setLoop(enabled) {
+    loopEnabled = enabled
+    toggleLoopBtn.textContent = `Auto scan: ${loopEnabled ? 'aan' : 'uit'}`
+
+    if (loopTimer) {
+      clearInterval(loopTimer)
+      loopTimer = null
+    }
+
+    if (loopEnabled) {
+      loopTimer = setInterval(() => safeScanOnce(), 1800)
+    }
+  }
+
+  startCameraBtn.addEventListener('click', () => startCamera().catch((error) => setStatus(error.message, false)))
+  scanOnceBtn.addEventListener('click', () => safeScanOnce())
+  toggleLoopBtn.addEventListener('click', () => setLoop(!loopEnabled))
+})()
 </script>
 
 <%- include('../partials/page-shell-end'); %>

@@ -29,6 +29,94 @@ function parseBackupJson(raw) {
   }
 }
 
+const DATA_ROWS_DEF = [
+  { x: 4, y: 4, bits: 13 },
+  { x: 4, y: 13, bits: 15 },
+  { x: 4, y: 22, bits: 15 },
+  { x: 4, y: 31, bits: 15 },
+  { x: 4, y: 40, bits: 15 },
+  { x: 4, y: 49, bits: 15 }
+]
+
+const TOTAL_BACKUP_BITS = DATA_ROWS_DEF.reduce((sum, row) => sum + row.bits, 0)
+
+function hexDigit(value) {
+  const v = Number(value) & 0x0F
+  return v < 10 ? String(v) : String.fromCharCode(65 + v - 10)
+}
+
+function calculateBackupChecksum(data) {
+  let total = 0
+  for (const ch of String(data || '')) total += ch.charCodeAt(0)
+  return hexDigit(total % 16)
+}
+
+function nibbleToHex(value) {
+  return hexDigit(value)
+}
+
+function decodeBackupBits(rawBits) {
+  const bits = String(rawBits || '').replace(/[^01]/g, '')
+  if (bits.length < TOTAL_BACKUP_BITS) {
+    return { ok: false, error: `Te weinig bits ontvangen (${bits.length}/${TOTAL_BACKUP_BITS})`, bits }
+  }
+
+  const usedBits = bits.slice(0, TOTAL_BACKUP_BITS)
+  const values = []
+
+  for (let i = 0; i + 3 < usedBits.length; i += 4) {
+    values.push(parseInt(usedBits.slice(i, i + 4), 2))
+  }
+
+  if (values.length < 6) {
+    return { ok: false, error: 'Code is te kort', bits: usedBits }
+  }
+
+  const postPrefix = values[0]
+  if (postPrefix !== 14) {
+    return { ok: false, error: 'Post-prefix P niet herkend', bits: usedBits, values }
+  }
+
+  const postDigit1 = values[1]
+  const postDigit2 = values[2]
+  if (postDigit1 > 9 || postDigit2 > 9) {
+    return { ok: false, error: 'Postnummer niet herkend', bits: usedBits, values }
+  }
+
+  const answerValue = values[3]
+  const answer = answerValue === 13 ? 'R' : answerValue === 12 ? 'G' : answerValue === 11 ? 'B' : null
+  if (!answer) {
+    return { ok: false, error: 'Antwoordkleur niet herkend', bits: usedBits, values }
+  }
+
+  const postId = `p${postDigit1}${postDigit2}`
+  const candidates = []
+  const maxUidLength = Math.min(17, values.length - 5)
+
+  for (let uidLength = 4; uidLength <= maxUidLength; uidLength++) {
+    const uidValues = values.slice(4, 4 + uidLength)
+    const checksumValue = values[4 + uidLength]
+    if (checksumValue === undefined) continue
+
+    const uid = uidValues.map(nibbleToHex).join('')
+    const rawPayload = `P${postDigit1}${postDigit2}${answer}${uid}`
+    const expectedChecksum = calculateBackupChecksum(rawPayload)
+    const receivedChecksum = nibbleToHex(checksumValue)
+
+    if (expectedChecksum === receivedChecksum) {
+      candidates.push({ postId, uid, answer, checksum: receivedChecksum, uidLength, rawPayload })
+    }
+  }
+
+  if (!candidates.length) {
+    return { ok: false, error: 'Checksum klopt niet', bits: usedBits, values }
+  }
+
+  candidates.sort((a, b) => b.uidLength - a.uidLength)
+  return { ok: true, bits: usedBits, values, candidates, decoded: candidates[0] }
+}
+
+
 router.get('/', (req, res) => res.redirect('/dashboard'))
 
 router.get('/login', (req, res) => {
@@ -100,64 +188,79 @@ router.get('/leiding-overzicht', requireLogin, async (req, res, next) => {
 
 router.get('/import', requireLogin, (req, res) => {
   res.render('pages/import', {
-    rawJson: '',
-    parsedCount: 0,
-    results: [],
+    result: null,
     error: null
   })
 })
 
-router.post('/import', requireLogin, async (req, res) => {
-  const rawJson = String(req.body.json || '')
-
+router.post('/import/scan-code', requireLogin, async (req, res) => {
   try {
-    const objects = parseBackupJson(rawJson)
-    const results = []
+    const decoded = decodeBackupBits(req.body.bits)
 
-    for (const item of objects) {
-      results.push(await saveAnswerFromEsp({
-        postId: item.postId || item.id,
-        teamId: item.teamId || item.cardId,
-        cardId: item.cardId || item.teamId,
-        answer: item.answer
-      }))
+    if (!decoded.ok) {
+      return res.status(400).json(decoded)
     }
 
-    res.render('pages/import', {
-      rawJson,
-      parsedCount: objects.length,
-      results,
-      error: null
+    const attempts = []
+
+    for (const candidate of decoded.candidates) {
+      const result = await saveAnswerFromEsp({
+        postId: candidate.postId,
+        cardId: candidate.uid,
+        teamId: candidate.uid,
+        answer: candidate.answer,
+        allowOverwrite: false
+      })
+
+      attempts.push({ candidate, result })
+
+      if (result.ok || result.alreadyAnswered) {
+        return res.json({
+          ok: true,
+          decoded: candidate,
+          alreadyAnswered: Boolean(result.alreadyAnswered),
+          importResult: result,
+          attempts
+        })
+      }
+    }
+
+    res.status(400).json({
+      ok: false,
+      error: 'Code gelezen, maar geen passend team/post antwoord gevonden',
+      decoded: decoded.decoded,
+      candidates: decoded.candidates,
+      attempts
     })
   } catch (error) {
-    res.status(400).render('pages/import', {
-      rawJson,
-      parsedCount: 0,
-      results: [],
-      error: 'Ongeldige JSON. Plak een JSON-array, één JSON-object, of meerdere JSON-objecten onder elkaar.'
-    })
+    res.status(500).json({ ok: false, error: error.message || 'Import mislukt' })
   }
 })
 
-
-
-router.post('/import/scan-code', requireLogin, async (req, res, next) => {
+router.post('/import', requireLogin, async (req, res) => {
   try {
-    const result = await saveAnswerFromEsp({
-      postId: req.body.postId,
-      cardId: req.body.uid,
-      teamId: req.body.uid,
-      answer: req.body.answer,
-      allowOverwrite: false
-    })
+    const decoded = decodeBackupBits(req.body.bits || '')
+    let result = null
 
-    if (!result.ok) {
-      return res.status(result.alreadyAnswered ? 409 : 400).json(result)
+    if (decoded.ok) {
+      result = await saveAnswerFromEsp({
+        postId: decoded.decoded.postId,
+        cardId: decoded.decoded.uid,
+        teamId: decoded.decoded.uid,
+        answer: decoded.decoded.answer,
+        allowOverwrite: false
+      })
     }
 
-    res.json(result)
+    res.render('pages/import', {
+      result: result || decoded,
+      error: decoded.ok ? null : decoded.error
+    })
   } catch (error) {
-    next(error)
+    res.status(400).render('pages/import', {
+      result: null,
+      error: error.message || 'Import mislukt'
+    })
   }
 })
 

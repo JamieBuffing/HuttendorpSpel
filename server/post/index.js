@@ -10,69 +10,6 @@ const {
 
 const router = express.Router()
 
-
-router.post('/api/box/check-card', async (req, res, next) => {
-  try {
-    const database = await db()
-    const postId = String(req.body.postId || '').trim()
-    const uid = String(req.body.uid || req.body.cardId || req.body.teamId || '').trim().toUpperCase()
-
-    if (!postId) return res.status(400).json({ ok: false, error: 'postId ontbreekt' })
-    if (!uid) return res.status(400).json({ ok: false, error: 'uid/cardId ontbreekt' })
-
-    const [team, question] = await Promise.all([
-      database.collection('teams').findOne({ cardId: uid, isActive: { $ne: false } }),
-      database.collection('questions').findOne({ postId, type: 'normal', isActive: { $ne: false } })
-    ])
-
-    if (!team) return res.status(404).json({ ok: false, error: 'Team niet gevonden', uid, postId })
-    if (!question) return res.status(404).json({ ok: false, error: 'Vraag/post niet gevonden', uid, postId, teamName: team.name })
-
-    const existingProgress = (team.questionProgress || []).find((item) => {
-      return item.type === 'normal' && String(item.questionId) === String(question._id)
-    })
-
-    res.json({
-      ok: true,
-      uid,
-      postId,
-      teamId: String(team._id),
-      teamName: team.name,
-      questionTitle: question.title,
-      alreadyAnswered: Boolean(existingProgress),
-      existingAnswer: existingProgress?.selectedAnswer || null,
-      answeredAt: existingProgress?.answeredAt || null
-    })
-  } catch (error) {
-    next(error)
-  }
-})
-
-router.post('/api/box/submit-answer', async (req, res, next) => {
-  try {
-    const result = await saveAnswerFromEsp({
-      postId: req.body.postId,
-      cardId: req.body.uid || req.body.cardId || req.body.teamId,
-      teamId: req.body.uid || req.body.cardId || req.body.teamId,
-      answer: req.body.answer,
-      allowOverwrite: false
-    })
-
-    if (!result.ok) {
-      const status = result.alreadyAnswered ? 409 : 400
-      return res.status(status).json(result)
-    }
-
-    res.json(result)
-  } catch (error) {
-    next(error)
-  }
-})
-
-router.get('/api/box/status', async (req, res) => {
-  res.json({ ok: true, service: 'box-api', time: new Date().toISOString() })
-})
-
 function hintFromBody(prefix, body) {
   const type = body[`${prefix}HintType`] || 'none'
   const value = String(body[`${prefix}HintValue`] || '').trim()
@@ -202,6 +139,69 @@ router.post('/questions/:id/delete', requireLogin, async (req, res, next) => {
   } catch (error) {
     next(error)
   }
+})
+
+
+router.post('/api/box/check-card', async (req, res, next) => {
+  try {
+    const database = await db()
+    const postId = String(req.body.postId || '').trim()
+    const uid = String(req.body.uid || req.body.cardId || req.body.teamId || '').trim().toUpperCase()
+
+    if (!postId) return res.status(400).json({ ok: false, error: 'postId ontbreekt' })
+    if (!uid) return res.status(400).json({ ok: false, error: 'uid/cardId ontbreekt' })
+
+    const [team, question] = await Promise.all([
+      database.collection('teams').findOne({ cardId: uid, isActive: { $ne: false } }),
+      database.collection('questions').findOne({ postId, type: 'normal', isActive: { $ne: false } })
+    ])
+
+    if (!team) return res.status(404).json({ ok: false, error: 'Team niet gevonden', uid, postId })
+    if (!question) return res.status(404).json({ ok: false, error: 'Vraag/post niet gevonden', uid, postId, teamName: team.name })
+
+    const existingProgress = (team.questionProgress || []).find((item) => {
+      return item.type === 'normal' && String(item.questionId) === String(question._id)
+    })
+
+    res.json({
+      ok: true,
+      uid,
+      postId,
+      teamId: String(team._id),
+      teamName: team.name,
+      questionTitle: question.title,
+      alreadyAnswered: Boolean(existingProgress),
+      existingAnswer: existingProgress?.selectedAnswer || null,
+      answeredAt: existingProgress?.answeredAt || null
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/api/box/submit-answer', async (req, res, next) => {
+  try {
+    const result = await saveAnswerFromEsp({
+      postId: req.body.postId,
+      cardId: req.body.uid || req.body.cardId || req.body.teamId,
+      teamId: req.body.uid || req.body.cardId || req.body.teamId,
+      answer: req.body.answer,
+      allowOverwrite: false
+    })
+
+    if (!result.ok) {
+      const status = result.alreadyAnswered ? 409 : 400
+      return res.status(status).json(result)
+    }
+
+    res.json(result)
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/api/box/status', async (req, res) => {
+  res.json({ ok: true, service: 'box-api', time: new Date().toISOString() })
 })
 
 router.post('/api/esp32/answer', async (req, res, next) => {
