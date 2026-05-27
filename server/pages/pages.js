@@ -13,155 +13,56 @@ const {
 
 const router = express.Router()
 
-function parseBackupJson(raw) {
-  const value = String(raw || '').trim()
-  if (!value) return []
-
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed : [parsed]
-  } catch (error) {
-    return value
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => JSON.parse(line))
-  }
-}
-
-const DATA_ROWS_DEF = [
-  { x: 4, y: 4, bits: 13 },
-  { x: 4, y: 13, bits: 15 },
-  { x: 4, y: 22, bits: 15 },
-  { x: 4, y: 31, bits: 15 },
-  { x: 4, y: 40, bits: 15 },
-  { x: 4, y: 49, bits: 15 }
-]
-
-const TOTAL_BACKUP_BITS = DATA_ROWS_DEF.reduce((sum, row) => sum + row.bits, 0)
-
-function hexDigit(value) {
-  const v = Number(value) & 0x0F
-  return v < 10 ? String(v) : String.fromCharCode(65 + v - 10)
-}
-
-function calculateBackupChecksum(data) {
-  let total = 0
-  for (const ch of String(data || '')) total += ch.charCodeAt(0)
-  return hexDigit(total % 16)
-}
-
 function nibbleToHex(value) {
-  return hexDigit(value)
+  const clean = Number(value || 0) & 15
+  return clean < 10 ? String(clean) : String.fromCharCode(55 + clean)
 }
 
-function decodeBackupBits(rawBits) {
-  const bits = String(rawBits || '').replace(/[^01]/g, '')
+function checksumHex(data) {
+  const total = String(data || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) % 16
+  return nibbleToHex(total)
+}
 
-  if (bits.length < TOTAL_BACKUP_BITS) {
-    return {
-      ok: false,
-      error: `Te weinig bits ontvangen (${bits.length}/${TOTAL_BACKUP_BITS})`,
-      bits
+function bitsToNibble(bits) {
+  return String(bits || '').split('').reduce((value, bit) => (value << 1) + (bit === '1' ? 1 : 0), 0) & 15
+}
+
+function decodeBackupRows(rows) {
+  if (!Array.isArray(rows) || rows.length !== 6) {
+    throw new Error('Er zijn exact 6 coderegels nodig.')
+  }
+
+  const nibbles = []
+  for (const row of rows) {
+    const cleanRow = String(row || '').replace(/[^01]/g, '')
+    if (cleanRow.length !== 16) {
+      throw new Error('Elke coderegel moet 16 bits bevatten.')
+    }
+
+    for (let i = 0; i < 16; i += 4) {
+      nibbles.push(bitsToNibble(cleanRow.slice(i, i + 4)))
     }
   }
 
-  const usedBits = bits.slice(0, TOTAL_BACKUP_BITS)
-  const allValues = []
+  // Arduino payload-indeling:
+  // positie 0: P, 1-2: postnummer, 3: antwoord, 4-17: UID, 18: checksum, 19-23: padding
+  const postId = `p${nibbleToHex(nibbles[1])}${nibbleToHex(nibbles[2])}`.toLowerCase()
+  const answerMap = { 13: 'R', 12: 'G', 11: 'B' }
+  const answer = answerMap[nibbles[3]]
 
-  for (let i = 0; i + 3 < usedBits.length; i += 4) {
-    allValues.push(parseInt(usedBits.slice(i, i + 4), 2))
+  if (!answer) {
+    throw new Error('Antwoord kon niet worden gelezen.')
   }
 
-  if (allValues.length < 6) {
-    return {
-      ok: false,
-      error: 'Code is te kort',
-      bits: usedBits,
-      values: allValues
-    }
+  const uid = nibbles.slice(4, 18).map(nibbleToHex).join('').toUpperCase()
+  const checksum = nibbleToHex(nibbles[18])
+  const expectedChecksum = checksumHex(`P${postId.slice(1).toUpperCase()}${answer}${uid}`)
+
+  if (checksum !== expectedChecksum) {
+    throw new Error(`Checksum klopt niet. Gelezen: ${checksum}, verwacht: ${expectedChecksum}.`)
   }
 
-  const candidates = []
-
-  for (let offset = 0; offset < allValues.length; offset++) {
-    const values = allValues.slice(offset)
-
-    if (values.length < 6) continue
-
-    const postPrefix = values[0]
-
-    if (postPrefix !== 14) {
-      continue
-    }
-
-    const postDigit1 = values[1]
-    const postDigit2 = values[2]
-
-    if (postDigit1 > 9 || postDigit2 > 9) {
-      continue
-    }
-
-    const answerValue = values[3]
-    const answer =
-      answerValue === 13 ? 'R' :
-      answerValue === 12 ? 'G' :
-      answerValue === 11 ? 'B' :
-      null
-
-    if (!answer) {
-      continue
-    }
-
-    const postId = `p${postDigit1}${postDigit2}`
-    const maxUidLength = Math.min(17, values.length - 5)
-
-    for (let uidLength = 4; uidLength <= maxUidLength; uidLength++) {
-      const uidValues = values.slice(4, 4 + uidLength)
-      const checksumValue = values[4 + uidLength]
-
-      if (checksumValue === undefined) continue
-
-      const uid = uidValues.map(nibbleToHex).join('')
-      const rawPayload = `P${postDigit1}${postDigit2}${answer}${uid}`
-      const expectedChecksum = calculateBackupChecksum(rawPayload)
-      const receivedChecksum = nibbleToHex(checksumValue)
-
-      if (expectedChecksum === receivedChecksum) {
-        candidates.push({
-          postId,
-          uid,
-          answer,
-          checksum: receivedChecksum,
-          uidLength,
-          rawPayload,
-          offset
-        })
-      }
-    }
-  }
-
-  if (!candidates.length) {
-    return {
-      ok: false,
-      error: 'Checksum klopt niet of P-start niet gevonden',
-      bits: usedBits,
-      values: allValues
-    }
-  }
-
-  candidates.sort((a, b) => {
-    if (a.offset !== b.offset) return a.offset - b.offset
-    return b.uidLength - a.uidLength
-  })
-
-  return {
-    ok: true,
-    bits: usedBits,
-    values: allValues,
-    candidates,
-    decoded: candidates[0]
-  }
+  return { postId, uid, answer, checksum }
 }
 
 router.get('/', (req, res) => res.redirect('/dashboard'))
@@ -242,71 +143,56 @@ router.get('/import', requireLogin, (req, res) => {
 
 router.post('/import/scan-code', requireLogin, async (req, res) => {
   try {
-    const decoded = decodeBackupBits(req.body.bits)
+    const decoded = decodeBackupRows(req.body.rows)
+    const result = await saveAnswerFromEsp({
+      postId: decoded.postId,
+      teamId: decoded.uid,
+      cardId: decoded.uid,
+      answer: decoded.answer,
+      allowOverwrite: false
+    })
 
-    if (!decoded.ok) {
-      return res.status(400).json(decoded)
-    }
-
-    const attempts = []
-
-    for (const candidate of decoded.candidates) {
-      const result = await saveAnswerFromEsp({
-        postId: candidate.postId,
-        cardId: candidate.uid,
-        teamId: candidate.uid,
-        answer: candidate.answer,
-        allowOverwrite: false
-      })
-
-      attempts.push({ candidate, result })
-
-      if (result.ok || result.alreadyAnswered) {
-        return res.json({
-          ok: true,
-          decoded: candidate,
-          alreadyAnswered: Boolean(result.alreadyAnswered),
-          importResult: result,
-          attempts
-        })
-      }
-    }
-
-    res.status(400).json({
-      ok: false,
-      error: 'Code gelezen, maar geen passend team/post antwoord gevonden',
-      decoded: decoded.decoded,
-      candidates: decoded.candidates,
-      attempts
+    res.status(result.ok || result.alreadyAnswered ? 200 : 400).json({
+      ok: Boolean(result.ok || result.alreadyAnswered),
+      decoded,
+      result,
+      alreadyAnswered: Boolean(result.alreadyAnswered)
     })
   } catch (error) {
-    res.status(500).json({ ok: false, error: error.message || 'Import mislukt' })
+    res.status(400).json({
+      ok: false,
+      error: error.message || 'Backup-code kon niet worden gelezen.'
+    })
   }
 })
 
 router.post('/import', requireLogin, async (req, res) => {
   try {
-    const decoded = decodeBackupBits(req.body.bits || '')
-    let result = null
-
-    if (decoded.ok) {
-      result = await saveAnswerFromEsp({
-        postId: decoded.decoded.postId,
-        cardId: decoded.decoded.uid,
-        teamId: decoded.decoded.uid,
-        answer: decoded.decoded.answer,
-        allowOverwrite: false
-      })
+    let rows = req.body.rows
+    if (typeof rows === 'string') {
+      rows = rows
+        .split('\n')
+        .map((row) => row.trim())
+        .filter(Boolean)
     }
 
+    const decoded = decodeBackupRows(rows)
+    const result = await saveAnswerFromEsp({
+      postId: decoded.postId,
+      teamId: decoded.uid,
+      cardId: decoded.uid,
+      answer: decoded.answer,
+      allowOverwrite: false
+    })
+
     res.render('pages/import', {
-      result: result || decoded,
-      error: decoded.ok ? null : decoded.error
+      result: { decoded, result },
+      error: null
     })
   } catch (error) {
     res.status(400).render('pages/import', {
       result: null,
-      error: error.message || 'Import mislukt'
+      error: error.message || 'Backup-code kon niet worden gelezen.'
     })
   }
 })

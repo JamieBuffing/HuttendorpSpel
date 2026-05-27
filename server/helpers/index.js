@@ -65,7 +65,7 @@ async function saveAnswerFromEsp({ postId, cardId, teamId, answer, allowOverwrit
   ])
 
   if (!team) return { ok: false, error: 'Team niet gevonden', postId: cleanPostId, cardId: cleanCardId, answer: selectedAnswer }
-  if (!question) return { ok: false, error: 'Vraag/post niet gevonden', postId: cleanPostId, cardId: cleanCardId, answer: selectedAnswer, teamName: team.name }
+  if (!question) return { ok: false, error: 'Vraag/post niet gevonden', postId: cleanPostId, cardId: cleanCardId, answer: selectedAnswer }
 
   const existingProgress = (team.questionProgress || []).find((item) => {
     return item.type === 'normal' && String(item.questionId) === String(question._id)
@@ -101,10 +101,12 @@ async function saveAnswerFromEsp({ postId, cardId, teamId, answer, allowOverwrit
     answeredAt: new Date()
   }
 
-  await database.collection('teams').updateOne(
-    { _id: team._id },
-    { $pull: { questionProgress: { questionId: question._id } } }
-  )
+  if (existingProgress) {
+    await database.collection('teams').updateOne(
+      { _id: team._id },
+      { $pull: { questionProgress: { questionId: question._id } } }
+    )
+  }
 
   await database.collection('teams').updateOne(
     { _id: team._id },

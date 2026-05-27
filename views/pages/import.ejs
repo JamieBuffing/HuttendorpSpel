@@ -2,262 +2,235 @@
 
 <section class="panel">
   <h1>Backup scanner</h1>
-  <p>Richt de camera op het OLED-scherm. Zorg dat de code recht en groot in het kader staat.</p>
+  <p>Scan hier de backup-code van het OLED-scherm van een postbox. De oude JSON-import is hiermee vervangen.</p>
 
   <% if (error) { %>
     <p class="error"><%= error %></p>
   <% } %>
 
   <div class="backupScanner">
-    <div class="videoWrap">
-      <video id="video" autoplay playsinline muted></video>
-      <div class="scanFrame">
-        <span>OLED in dit vak</span>
+    <div class="scannerVideoWrap">
+      <video id="backupVideo" playsinline muted></video>
+      <div class="scannerOverlay">
+        <div class="scannerFrame"></div>
       </div>
+      <canvas id="scanCanvas" width="128" height="64" hidden></canvas>
     </div>
 
-    <div class="buttonRow">
-      <button class="button" type="button" id="startCamera">Camera starten</button>
-      <button class="button" type="button" id="scanOnce">Scan één keer</button>
-      <button class="button secondary" type="button" id="toggleLoop">Auto scan: uit</button>
+    <div class="scannerControls">
+      <button class="button" type="button" id="startCameraBtn">Camera starten</button>
+      <button class="button secondary" type="button" id="scanOnceBtn" disabled>Scan nu</button>
+      <button class="button secondary" type="button" id="stopCameraBtn" disabled>Camera stoppen</button>
     </div>
 
-    <p id="scanStatus" class="helpText">Nog niet gescand.</p>
+    <p class="helpText">
+      Houd de witte rand van de OLED-code precies binnen het kader. Zorg dat het scherm helder, recht en scherp in beeld is.
+    </p>
 
-    <canvas id="workCanvas" width="128" height="64" hidden></canvas>
+    <div id="scanMessage" class="scannerMessage">Nog niet gescand.</div>
+
+    <details class="manualFallback">
+      <summary>Handmatig testen met 6 bitregels</summary>
+      <form method="post" action="/import" class="formStack">
+        <label>6 regels van 16 bits
+          <textarea name="rows" rows="7" placeholder="1110000000011101&#10;0000010000101010&#10;0001011010111010&#10;1111110000100000&#10;1001000100000000&#10;0000000000000000"></textarea>
+        </label>
+        <button class="button" type="submit">Handmatig importeren</button>
+      </form>
+    </details>
   </div>
 </section>
 
-<section class="panel">
-  <h2>Laatste resultaat</h2>
-  <pre id="resultBox" style="white-space:pre-wrap;word-break:break-word;">Geen resultaat.</pre>
-</section>
+<% if (result) { %>
+  <section class="panel">
+    <h2>Import resultaat</h2>
+    <table class="dataTable">
+      <tbody>
+        <tr><th>Post</th><td><%= result.decoded.postId %></td></tr>
+        <tr><th>UID</th><td><%= result.decoded.uid %></td></tr>
+        <tr><th>Antwoord</th><td><%= result.decoded.answer %></td></tr>
+        <tr><th>Status</th><td><%= result.result.ok ? 'Opgeslagen' : (result.result.alreadyAnswered ? 'Al gedaan' : 'Niet opgeslagen') %></td></tr>
+        <tr><th>Melding</th><td><%= result.result.questionTitle || result.result.error || '-' %></td></tr>
+      </tbody>
+    </table>
+  </section>
+<% } %>
 
 <style>
-.backupScanner .videoWrap{
-  position:relative;
-  width:min(680px,100%);
-  margin:0 auto 1rem;
-  background:#000;
-  border-radius:16px;
-  overflow:hidden;
-}
-.backupScanner video{
-  display:block;
-  width:100%;
-  min-height:260px;
-  background:#000;
-}
-.scanFrame{
-  position:absolute;
-  left:50%;
-  top:50%;
-  width:82%;
-  aspect-ratio:2/1;
-  transform:translate(-50%,-50%);
-  border:3px solid rgba(255,255,255,.95);
-  box-shadow:0 0 0 999px rgba(0,0,0,.30);
-  border-radius:8px;
-  pointer-events:none;
-}
-.scanFrame span{
-  position:absolute;
-  left:50%;
-  bottom:-2rem;
-  transform:translateX(-50%);
-  font-size:.9rem;
-  color:#fff;
-  background:rgba(0,0,0,.65);
-  padding:.25rem .5rem;
-  border-radius:.5rem;
-  white-space:nowrap;
-}
-.buttonRow{
-  display:flex;
-  flex-wrap:wrap;
-  gap:.75rem;
-  justify-content:center;
-}
-.secondary{opacity:.85}
+  .backupScanner { display: grid; gap: 1rem; }
+  .scannerVideoWrap { position: relative; width: min(100%, 720px); margin: 0 auto; background: #050505; border-radius: 16px; overflow: hidden; aspect-ratio: 2 / 1; }
+  #backupVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scannerOverlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+  .scannerFrame { width: 82%; aspect-ratio: 2 / 1; border: 3px solid #00ff88; border-radius: 8px; box-shadow: 0 0 0 999px rgba(0,0,0,.28); }
+  .scannerControls { display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center; }
+  .scannerMessage { padding: .9rem 1rem; border-radius: 12px; background: #111; color: #fff; text-align: center; font-weight: 700; }
+  .scannerMessage.ok { background: #063; }
+  .scannerMessage.error { background: #700; }
+  .scannerMessage.busy { background: #665000; }
+  .manualFallback { margin-top: .5rem; }
 </style>
 
 <script>
 (() => {
-  const video = document.getElementById('video')
-  const canvas = document.getElementById('workCanvas')
+  const video = document.getElementById('backupVideo')
+  const canvas = document.getElementById('scanCanvas')
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  const startCameraBtn = document.getElementById('startCamera')
-  const scanOnceBtn = document.getElementById('scanOnce')
-  const toggleLoopBtn = document.getElementById('toggleLoop')
-  const scanStatus = document.getElementById('scanStatus')
-  const resultBox = document.getElementById('resultBox')
+  const startBtn = document.getElementById('startCameraBtn')
+  const scanBtn = document.getElementById('scanOnceBtn')
+  const stopBtn = document.getElementById('stopCameraBtn')
+  const message = document.getElementById('scanMessage')
 
   let stream = null
-  let loopEnabled = false
-  let loopTimer = null
+  let scanTimer = null
+  let lastRows = ''
+  let lastSubmitAt = 0
 
-  const DATA_ROWS = [
-    { x: 4, y: 4, bits: 13 },
-    { x: 4, y: 13, bits: 15 },
-    { x: 4, y: 22, bits: 15 },
-    { x: 4, y: 31, bits: 15 },
-    { x: 4, y: 40, bits: 15 },
-    { x: 4, y: 49, bits: 15 }
-  ]
+  function setMessage(text, type = '') {
+    message.textContent = text
+    message.className = 'scannerMessage ' + type
+  }
 
-  function setStatus(text, ok = null) {
-    scanStatus.textContent = text
-    scanStatus.className = ok === true ? 'helpText success' : ok === false ? 'helpText error' : 'helpText'
+  function stopCamera() {
+    if (scanTimer) window.clearInterval(scanTimer)
+    scanTimer = null
+    if (stream) stream.getTracks().forEach((track) => track.stop())
+    stream = null
+    video.srcObject = null
+    scanBtn.disabled = true
+    stopBtn.disabled = true
+    startBtn.disabled = false
   }
 
   async function startCamera() {
-    if (stream) return
-
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      },
-      audio: false
-    })
-
-    video.srcObject = stream
-    await video.play()
-    setStatus('Camera gestart. Houd het OLED-scherm in het kader.')
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      })
+      video.srcObject = stream
+      await video.play()
+      scanBtn.disabled = false
+      stopBtn.disabled = false
+      startBtn.disabled = true
+      setMessage('Camera gestart. Richt het kader op de OLED-code.', 'busy')
+      scanTimer = window.setInterval(scanAndMaybeSubmit, 700)
+    } catch (error) {
+      setMessage('Camera kon niet starten: ' + (error.message || error), 'error')
+    }
   }
 
-  function cropVideoToOledCanvas() {
-    if (!video.videoWidth || !video.videoHeight) {
-      throw new Error('Camera is nog niet klaar')
+  function getCenterCrop(videoWidth, videoHeight) {
+    const targetRatio = 2
+    let cropWidth = videoWidth
+    let cropHeight = Math.round(cropWidth / targetRatio)
+
+    if (cropHeight > videoHeight) {
+      cropHeight = videoHeight
+      cropWidth = Math.round(cropHeight * targetRatio)
     }
 
-    const vw = video.videoWidth
-    const vh = video.videoHeight
-    const wantedRatio = 2
-    let sw = vw
-    let sh = Math.round(vw / wantedRatio)
-
-    if (sh > vh) {
-      sh = vh
-      sw = Math.round(vh * wantedRatio)
+    return {
+      x: Math.floor((videoWidth - cropWidth) / 2),
+      y: Math.floor((videoHeight - cropHeight) / 2),
+      width: cropWidth,
+      height: cropHeight
     }
-
-    const sx = Math.floor((vw - sw) / 2)
-    const sy = Math.floor((vh - sh) / 2)
-
-    ctx.imageSmoothingEnabled = false
-    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, 128, 64)
-
-    return ctx.getImageData(0, 0, 128, 64)
   }
 
-  function pixelScore(r, g, b) {
-    const brightness = (r + g + b) / 3
-    const blueScore = b * 1.25 + g * 0.35 - r * 0.25
-    return Math.max(brightness, blueScore)
-  }
+  function readRowsFromFrame() {
+    if (!video.videoWidth || !video.videoHeight) return null
 
-  function sampleBlock(imageData, x, y, w, h) {
-    let total = 0
-    let count = 0
+    const crop = getCenterCrop(video.videoWidth, video.videoHeight)
+    ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, 128, 64)
 
-    for (let yy = y; yy < y + h; yy++) {
-      for (let xx = x; xx < x + w; xx++) {
-        if (xx < 0 || yy < 0 || xx >= 128 || yy >= 64) continue
-        const i = (yy * 128 + xx) * 4
-        total += pixelScore(imageData.data[i], imageData.data[i + 1], imageData.data[i + 2])
-        count++
+    const image = ctx.getImageData(0, 0, 128, 64)
+    const data = image.data
+    const brightness = []
+
+    for (let y = 0; y < 64; y++) {
+      brightness[y] = []
+      for (let x = 0; x < 128; x++) {
+        const i = (y * 128 + x) * 4
+        brightness[y][x] = (data[i] + data[i + 1] + data[i + 2]) / 3
       }
     }
 
-    return count ? total / count : 0
-  }
+    // Dynamische drempel: OLED-wit moet duidelijk boven de achtergrond zitten.
+    const samples = []
+    for (let y = 0; y < 64; y += 2) {
+      for (let x = 0; x < 128; x += 2) samples.push(brightness[y][x])
+    }
+    samples.sort((a, b) => a - b)
+    const low = samples[Math.floor(samples.length * 0.20)] || 0
+    const high = samples[Math.floor(samples.length * 0.92)] || 255
+    const threshold = Math.max(35, (low + high) / 2)
 
-  function readBitsFromImage(imageData) {
-    const bits = []
-    const scores = []
-
-    for (const row of DATA_ROWS) {
-      for (let i = 0; i < row.bits; i++) {
-        const score = sampleBlock(imageData, row.x + i * 8 + 1, row.y + 1, 6, 6)
-        scores.push(score)
+    const rows = []
+    for (let row = 0; row < 6; row++) {
+      const bits = []
+      const yStart = 3 + row * 9
+      for (let bit = 0; bit < 16; bit++) {
+        const xStart = 6 + bit * 3
+        let total = 0
+        let white = 0
+        for (let yy = yStart; yy < yStart + 7; yy++) {
+          for (let xx = xStart; xx < xStart + 3; xx++) {
+            total++
+            if (brightness[yy]?.[xx] > threshold) white++
+          }
+        }
+        bits.push(white / total > 0.32 ? '1' : '0')
       }
+      rows.push(bits.join(''))
     }
 
-    const sorted = scores.slice().sort((a, b) => a - b)
-    const low = sorted[Math.floor(sorted.length * 0.20)] || 0
-    const high = sorted[Math.floor(sorted.length * 0.80)] || 255
-    const threshold = (low + high) / 2
-
-    for (const score of scores) bits.push(score >= threshold ? '1' : '0')
-
-    return { bits: bits.join(''), threshold, low, high }
+    return rows
   }
 
-  async function submitBits(bits) {
+  async function submitRows(rows) {
+    const key = rows.join('|')
+    if (key === lastRows && Date.now() - lastSubmitAt < 4500) return
+
+    lastRows = key
+    lastSubmitAt = Date.now()
+    setMessage('Code gelezen, importeren...', 'busy')
+
     const response = await fetch('/import/scan-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bits })
+      body: JSON.stringify({ rows })
     })
 
-    const data = await response.json().catch(() => ({ ok: false, error: 'Ongeldig serverantwoord' }))
+    const result = await response.json()
 
-    resultBox.textContent = JSON.stringify(data, null, 2)
-
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || 'Scan/import mislukt')
+    if (!response.ok || !result.ok) {
+      setMessage(result.error || result.result?.error || 'Import mislukt. Probeer opnieuw.', 'error')
+      return
     }
 
-    return data
+    const decoded = result.decoded
+    const status = result.alreadyAnswered ? 'al gedaan' : 'opgeslagen'
+    setMessage(`Gelukt: ${decoded.postId} / ${decoded.uid} / ${decoded.answer} (${status})`, 'ok')
   }
 
-  async function scanOnce() {
-    await startCamera()
-    const imageData = cropVideoToOledCanvas()
-    const read = readBitsFromImage(imageData)
-
-    setStatus(`Bits gelezen. Threshold ${Math.round(read.threshold)}. Uploaden...`)
-
-    const result = await submitBits(read.bits)
-    const decoded = result.decoded || {}
-    const importResult = result.importResult || {}
-
-    if (result.alreadyAnswered) {
-      setStatus(`Al gedaan: ${importResult.teamName || decoded.uid || ''}`, true)
-    } else {
-      setStatus(`Geïmporteerd: ${importResult.teamName || decoded.uid || ''} ${decoded.answer || ''}`, true)
-    }
-  }
-
-  async function safeScanOnce() {
+  async function scanAndMaybeSubmit() {
     try {
-      await scanOnce()
-      return true
+      const rows = readRowsFromFrame()
+      if (!rows) return
+      await submitRows(rows)
     } catch (error) {
-      setStatus(error.message || 'Scan mislukt', false)
-      return false
+      setMessage(error.message || 'Nog geen geldige code gelezen.', 'error')
     }
   }
 
-  function setLoop(enabled) {
-    loopEnabled = enabled
-    toggleLoopBtn.textContent = `Auto scan: ${loopEnabled ? 'aan' : 'uit'}`
-
-    if (loopTimer) {
-      clearInterval(loopTimer)
-      loopTimer = null
-    }
-
-    if (loopEnabled) {
-      loopTimer = setInterval(() => safeScanOnce(), 1800)
-    }
-  }
-
-  startCameraBtn.addEventListener('click', () => startCamera().catch((error) => setStatus(error.message, false)))
-  scanOnceBtn.addEventListener('click', () => safeScanOnce())
-  toggleLoopBtn.addEventListener('click', () => setLoop(!loopEnabled))
+  startBtn.addEventListener('click', startCamera)
+  scanBtn.addEventListener('click', scanAndMaybeSubmit)
+  stopBtn.addEventListener('click', stopCamera)
+  window.addEventListener('pagehide', stopCamera)
 })()
 </script>
 

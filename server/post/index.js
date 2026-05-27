@@ -145,6 +145,7 @@ router.post('/questions/:id/delete', requireLogin, async (req, res, next) => {
 router.post('/api/box/check-card', async (req, res, next) => {
   try {
     const database = await db()
+
     const postId = String(req.body.postId || '').trim()
     const uid = String(req.body.uid || req.body.cardId || req.body.teamId || '').trim().toUpperCase()
 
@@ -184,13 +185,13 @@ router.post('/api/box/submit-answer', async (req, res, next) => {
     const result = await saveAnswerFromEsp({
       postId: req.body.postId,
       cardId: req.body.uid || req.body.cardId || req.body.teamId,
-      teamId: req.body.uid || req.body.cardId || req.body.teamId,
+      teamId: req.body.teamId || req.body.cardId || req.body.uid,
       answer: req.body.answer,
       allowOverwrite: false
     })
 
     if (!result.ok) {
-      const status = result.alreadyAnswered ? 409 : 400
+      const status = result.alreadyAnswered ? 409 : (['Team niet gevonden', 'Vraag/post niet gevonden'].includes(result.error) ? 404 : 400)
       return res.status(status).json(result)
     }
 
