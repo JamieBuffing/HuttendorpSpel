@@ -1,81 +1,152 @@
 <%- include('../partials/page-shell-start', { title: 'QR backup scanner' }); %>
 
-<section class="panel">
-  <h1>QR backup scanner</h1>
-  <p>Scan de QR-code op het OLED-scherm. Formaat: <code>P01R042A16BAFC2091</code>.</p>
-
-  <% if (error) { %>
-    <p class="error"><%= error %></p>
-  <% } %>
-
-  <% if (result) { %>
-    <section class="notice success">
-      <h2>Import verwerkt</h2>
-      <p><strong>Post:</strong> <%= result.decoded.postId %></p>
-      <p><strong>Antwoord:</strong> <%= result.decoded.answer %></p>
-      <p><strong>UID:</strong> <%= result.decoded.uid %></p>
-    </section>
-  <% } %>
+<section class="panel qrHero">
+  <div>
+    <p class="eyebrow">Backup import</p>
+    <h1>QR-code scannen</h1>
+    <p class="heroText">Scan de OLED-code, controleer de gevonden gegevens en sla daarna op. Formaat: <code>P01R042A16BAFC2091</code>.</p>
+  </div>
+  <div class="heroBadge">
+    <span id="heroStepNumber">1</span>
+    <small id="heroStepText">Klaar om te scannen</small>
+  </div>
 </section>
 
-<section class="panel qrScannerPanel">
-  <div class="sectionHeader">
+<% if (error) { %>
+  <section class="panel notice error"><strong>Fout:</strong> <%= error %></section>
+<% } %>
+
+<% if (result) { %>
+  <section class="panel notice success">
+    <h2>Import verwerkt</h2>
+    <p><strong>Post:</strong> <%= result.decoded.postId %> · <strong>Antwoord:</strong> <%= result.decoded.answer %> · <strong>UID:</strong> <%= result.decoded.uid %></p>
+  </section>
+<% } %>
+
+<section class="panel scannerShell">
+  <div class="scannerTopbar">
     <div>
-      <h2>Camera scanner</h2>
-      <p>Druk op <strong>Scan code</strong>. Na een veilige scan verschijnt <strong>Opslaan</strong>. Daarna kun je direct de volgende code scannen.</p>
+      <h2>Camera</h2>
+      <p>Richt de telefoon op de QR-code. Na een veilige scan stopt de camera vanzelf.</p>
+    </div>
+    <span class="scannerPill" id="scannerPill">Stand-by</span>
+  </div>
+
+  <div class="scanStage" id="scanStage">
+    <div class="cameraPlaceholder" id="cameraPlaceholder">
+      <div class="placeholderIcon">▣</div>
+      <strong>Geen camera actief</strong>
+      <span>Druk hieronder op Scan code.</span>
+    </div>
+    <div class="qrVideoWrap" id="videoWrap" hidden>
+      <video id="qrVideo" muted playsinline></video>
+      <div class="scanOverlay">
+        <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+        <span>Houd de QR groot in beeld</span>
+      </div>
     </div>
   </div>
 
-  <div class="scannerControls">
-    <button class="button" id="scanBtn" type="button">Scan code</button>
-    <button class="button successButton" id="saveScanBtn" type="button" hidden>Opslaan</button>
-    <button class="button secondary" id="cancelScanBtn" type="button" hidden>Opnieuw scannen</button>
-  </div>
-
-  <div class="qrVideoWrap" id="videoWrap" hidden>
-    <video id="qrVideo" muted playsinline></video>
+  <div class="scanResultCard" id="scanResultCard" hidden>
+    <div class="resultHeader">
+      <div>
+        <p class="eyebrow">Gevonden</p>
+        <h3 id="foundCode">P01R042A16BAFC2091</h3>
+      </div>
+      <div class="answerBubble" id="foundAnswer">R</div>
+    </div>
+    <div class="resultGrid">
+      <div><span>Post</span><strong id="foundPost">p01</strong></div>
+      <div><span>UID</span><strong id="foundUid">042A16BAFC2091</strong></div>
+    </div>
   </div>
 
   <div class="scanStatus" id="scanStatus">Druk op “Scan code”.</div>
 
-  <div class="scanResultCard" id="scanResultCard" hidden>
-    <h3>Gevonden code</h3>
-    <p class="bigCode" id="foundCode"></p>
-    <dl>
-      <div><dt>Post</dt><dd id="foundPost"></dd></div>
-      <div><dt>Antwoord</dt><dd id="foundAnswer"></dd></div>
-      <div><dt>UID</dt><dd id="foundUid"></dd></div>
-    </dl>
+  <div class="primaryActions">
+    <button class="button scanPrimary" id="scanBtn" type="button">Scan code</button>
+    <button class="button savePrimary" id="saveScanBtn" type="button" hidden>Opslaan</button>
   </div>
+  <button class="plainAction" id="cancelScanBtn" type="button" hidden>Deze scan overslaan en opnieuw scannen</button>
 </section>
 
-<section class="panel">
-  <h2>Handmatig invoeren</h2>
-  <p>Werkt de camera niet? Vul dezelfde code handmatig in en sla hem direct op.</p>
-  <form method="post" action="/import" class="gridForm two">
-    <label>Code
-      <input name="code" id="manualCode" placeholder="P01R042A16BAFC2091" autocomplete="off" inputmode="text">
-    </label>
+<section class="panel manualPanel">
+  <div>
+    <h2>Handmatig invoeren</h2>
+    <p>Gebruik dit als de camera niet werkt. Typ of plak dezelfde code en sla direct op.</p>
+  </div>
+  <form method="post" action="/import" class="manualForm">
+    <input name="code" id="manualCode" placeholder="P01R042A16BAFC2091" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text">
     <button class="button" type="submit">Handmatig opslaan</button>
   </form>
 </section>
 
 <style>
-  .qrScannerPanel video { width: 100%; max-height: 70vh; background: #000; border-radius: 16px; object-fit: cover; }
-  .qrVideoWrap { overflow: hidden; border-radius: 16px; border: 1px solid rgba(255,255,255,.15); background:#000; margin-top: 12px; }
-  .scannerControls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:12px 0; }
-  .scanStatus { margin-top:12px; padding:12px; border-radius:12px; background:rgba(255,255,255,.08); font-weight:700; }
-  .scanStatus.ok { background:rgba(0,180,90,.16); }
-  .scanStatus.warn { background:rgba(255,180,0,.18); }
-  .scanStatus.error { background:rgba(255,0,0,.14); }
-  .scanResultCard { margin-top: 14px; padding: 14px; border-radius: 14px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }
-  .scanResultCard h3 { margin-top: 0; }
-  .bigCode { font-size: clamp(1.1rem, 3vw, 1.7rem); font-weight: 900; letter-spacing: .04em; overflow-wrap: anywhere; }
-  .scanResultCard dl { display: grid; gap: 8px; margin: 0; }
-  .scanResultCard dl div { display: grid; grid-template-columns: 110px 1fr; gap: 10px; }
-  .scanResultCard dt { opacity: .75; }
-  .scanResultCard dd { margin: 0; font-weight: 800; overflow-wrap: anywhere; }
-  .successButton { background: #18a558; }
+  .qrHero { display:flex; justify-content:space-between; gap:18px; align-items:center; background:linear-gradient(135deg, rgba(58,123,255,.20), rgba(255,255,255,.06)); }
+  .qrHero h1 { margin:.15rem 0 .35rem; font-size:clamp(2rem, 7vw, 3.4rem); line-height:1; }
+  .heroText { max-width:720px; margin:0; opacity:.86; }
+  .eyebrow { margin:0 0 4px; text-transform:uppercase; letter-spacing:.12em; font-size:.74rem; font-weight:900; opacity:.68; }
+  .heroBadge { min-width:128px; aspect-ratio:1; display:grid; place-items:center; text-align:center; border-radius:28px; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16); padding:16px; }
+  .heroBadge span { display:block; font-size:2.8rem; line-height:1; font-weight:1000; }
+  .heroBadge small { display:block; margin-top:8px; font-weight:800; opacity:.8; }
+
+  .scannerShell { display:grid; gap:16px; }
+  .scannerTopbar { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; }
+  .scannerTopbar h2, .manualPanel h2 { margin:0 0 4px; }
+  .scannerTopbar p, .manualPanel p { margin:0; opacity:.75; }
+  .scannerPill { padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.09); border:1px solid rgba(255,255,255,.12); font-weight:900; white-space:nowrap; }
+  .scannerPill.active { background:rgba(58,123,255,.22); }
+  .scannerPill.ready { background:rgba(0,190,110,.22); }
+  .scannerPill.error { background:rgba(255,60,60,.18); }
+
+  .scanStage { position:relative; min-height:280px; border-radius:24px; background:rgba(0,0,0,.34); border:1px solid rgba(255,255,255,.12); overflow:hidden; display:grid; place-items:center; }
+  .cameraPlaceholder { min-height:280px; display:grid; place-items:center; align-content:center; gap:8px; text-align:center; opacity:.75; padding:22px; }
+  .placeholderIcon { width:72px; height:72px; display:grid; place-items:center; border-radius:22px; background:rgba(255,255,255,.08); font-size:2.8rem; line-height:1; }
+  .cameraPlaceholder span { opacity:.75; }
+  .qrVideoWrap { position:relative; width:100%; height:min(68vh, 560px); background:#000; }
+  .qrScannerPanel video, .qrVideoWrap video { width:100%; height:100%; object-fit:cover; display:block; }
+  .scanOverlay { position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; }
+  .scanOverlay span { align-self:end; margin-bottom:18px; padding:8px 12px; border-radius:999px; background:rgba(0,0,0,.56); color:white; font-weight:900; }
+  .corner { position:absolute; width:58px; height:58px; border-color:rgba(255,255,255,.92); }
+  .corner.tl { left:22px; top:22px; border-left:5px solid; border-top:5px solid; border-radius:14px 0 0 0; }
+  .corner.tr { right:22px; top:22px; border-right:5px solid; border-top:5px solid; border-radius:0 14px 0 0; }
+  .corner.bl { left:22px; bottom:22px; border-left:5px solid; border-bottom:5px solid; border-radius:0 0 0 14px; }
+  .corner.br { right:22px; bottom:22px; border-right:5px solid; border-bottom:5px solid; border-radius:0 0 14px 0; }
+
+  .scanStatus { padding:14px 16px; border-radius:16px; background:rgba(255,255,255,.08); font-weight:900; text-align:center; }
+  .scanStatus.ok { background:rgba(0,190,110,.16); }
+  .scanStatus.warn { background:rgba(255,184,0,.18); }
+  .scanStatus.error { background:rgba(255,50,50,.16); }
+  .scanResultCard { padding:18px; border-radius:22px; background:rgba(0,190,110,.12); border:1px solid rgba(0,190,110,.26); }
+  .resultHeader { display:flex; justify-content:space-between; gap:14px; align-items:center; }
+  .resultHeader h3 { margin:0; font-size:clamp(1.15rem, 4vw, 2rem); overflow-wrap:anywhere; letter-spacing:.03em; }
+  .answerBubble { width:70px; height:70px; flex:0 0 auto; display:grid; place-items:center; border-radius:22px; background:rgba(255,255,255,.13); font-size:2.4rem; font-weight:1000; }
+  .resultGrid { display:grid; grid-template-columns:120px 1fr; gap:10px; margin-top:14px; }
+  .resultGrid div { padding:12px; border-radius:14px; background:rgba(255,255,255,.08); }
+  .resultGrid span { display:block; font-size:.78rem; opacity:.65; font-weight:800; }
+  .resultGrid strong { display:block; margin-top:2px; overflow-wrap:anywhere; }
+
+  .primaryActions { display:grid; grid-template-columns:1fr; gap:10px; }
+  .primaryActions .button { width:100%; min-height:58px; border-radius:18px; font-size:1.15rem; font-weight:1000; }
+  .scanPrimary { font-size:1.25rem; }
+  .savePrimary { background:#18a558; font-size:1.3rem !important; }
+  .plainAction { border:0; background:transparent; color:inherit; opacity:.78; text-decoration:underline; font-weight:800; cursor:pointer; padding:8px; }
+
+  .manualPanel { display:grid; gap:14px; }
+  .manualForm { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; }
+  .manualForm input { min-height:52px; border-radius:16px; padding:0 14px; font-size:1.05rem; font-weight:900; text-transform:uppercase; }
+  .manualForm .button { min-height:52px; border-radius:16px; white-space:nowrap; }
+
+  @media (max-width: 700px) {
+    .qrHero { align-items:flex-start; }
+    .heroBadge { min-width:94px; border-radius:22px; }
+    .heroBadge span { font-size:2.1rem; }
+    .scannerTopbar { align-items:flex-start; }
+    .scanStage, .cameraPlaceholder { min-height:230px; }
+    .qrVideoWrap { height: min(62vh, 460px); }
+    .manualForm { grid-template-columns:1fr; }
+    .resultGrid { grid-template-columns:1fr; }
+  }
 </style>
 
 <script type="module">
@@ -83,6 +154,7 @@
 
   const video = document.getElementById('qrVideo');
   const videoWrap = document.getElementById('videoWrap');
+  const cameraPlaceholder = document.getElementById('cameraPlaceholder');
   const statusEl = document.getElementById('scanStatus');
   const scanBtn = document.getElementById('scanBtn');
   const saveScanBtn = document.getElementById('saveScanBtn');
@@ -93,6 +165,9 @@
   const foundPost = document.getElementById('foundPost');
   const foundAnswer = document.getElementById('foundAnswer');
   const foundUid = document.getElementById('foundUid');
+  const scannerPill = document.getElementById('scannerPill');
+  const heroStepNumber = document.getElementById('heroStepNumber');
+  const heroStepText = document.getElementById('heroStepText');
 
   let scanner = null;
   let lastCode = '';
@@ -100,9 +175,20 @@
   let safeDecoded = null;
   let saving = false;
 
+  function setStep(number, text) {
+    heroStepNumber.textContent = number;
+    heroStepText.textContent = text;
+  }
+
+  function setPill(text, cls = '') {
+    scannerPill.textContent = text;
+    scannerPill.className = 'scannerPill' + (cls ? ' ' + cls : '');
+  }
+
   function setStatus(text, cls = '') {
     statusEl.textContent = text;
     statusEl.className = 'scanStatus' + (cls ? ' ' + cls : '');
+    if (cls === 'error') setPill('Fout', 'error');
   }
 
   function normalizeCode(raw) {
@@ -128,7 +214,10 @@
     saveScanBtn.hidden = false;
     cancelScanBtn.hidden = false;
     videoWrap.hidden = true;
-    setStatus('Veilige scan gevonden. Controleer kort en druk op Opslaan.', 'ok');
+    cameraPlaceholder.hidden = false;
+    setStep('2', 'Controleer en sla op');
+    setPill('Klaar om op te slaan', 'ready');
+    setStatus('Veilige scan gevonden. Druk op Opslaan.', 'ok');
   }
 
   async function stopScannerOnly() {
@@ -146,11 +235,14 @@
     saving = false;
     scanResultCard.hidden = true;
     videoWrap.hidden = true;
+    cameraPlaceholder.hidden = false;
     scanBtn.hidden = false;
     scanBtn.disabled = false;
     saveScanBtn.hidden = true;
     saveScanBtn.disabled = false;
     cancelScanBtn.hidden = true;
+    setStep('1', 'Klaar om te scannen');
+    setPill('Stand-by');
     setStatus(message);
   }
 
@@ -168,7 +260,7 @@
     else { lastCode = decoded.code; stableCount = 1; }
 
     if (stableCount < 2) {
-      setStatus(`QR gezien: ${decoded.code} — nog 1 veilige scan nodig`, 'warn');
+      setStatus(`QR gezien: ${decoded.code} — bevestigen...`, 'warn');
       return;
     }
 
@@ -179,12 +271,15 @@
   async function startScanner() {
     await resetForNextScan('Camera wordt gestart...');
     scanBtn.disabled = true;
+    cameraPlaceholder.hidden = true;
     videoWrap.hidden = false;
+    setStep('1', 'Scannen');
+    setPill('Camera actief', 'active');
     scanner = new QrScanner(video, onScan, {
       preferredCamera: 'environment',
       returnDetailedScanResult: true,
-      highlightScanRegion: true,
-      highlightCodeOutline: true,
+      highlightScanRegion: false,
+      highlightCodeOutline: false,
       maxScansPerSecond: 10
     });
     await scanner.start();
@@ -195,6 +290,8 @@
     if (!safeDecoded || saving) return;
     saving = true;
     saveScanBtn.disabled = true;
+    setStep('3', 'Opslaan');
+    setPill('Opslaan...', 'active');
     setStatus('Opslaan...', 'warn');
 
     try {
@@ -209,6 +306,7 @@
     } catch (error) {
       saving = false;
       saveScanBtn.disabled = false;
+      setStep('2', 'Probeer opnieuw');
       setStatus(error.message || 'Opslaan is mislukt.', 'error');
     }
   }
