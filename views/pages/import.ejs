@@ -2,7 +2,7 @@
 
 <section class="panel">
   <h1>HuttoCode scanner</h1>
-  <p>Scan hier de 16×8 backup-code van het OLED-scherm van een postbox. De scanner leest blauwe blokken op zwarte achtergrond.</p>
+  <p>Scan hier de 16×8 backup-code van het OLED-scherm van een postbox. De scanner zoekt automatisch het blauwe OLED-vlak in beeld en leest daarna de 16×8 HuttoCode.</p>
 
   <% if (error) { %>
     <p class="error"><%= error %></p>
@@ -14,7 +14,7 @@
       <div class="scannerOverlay">
         <div class="scannerFrame">
           <div class="scannerGrid"></div>
-          <div class="scannerHint">ongeveer hier is genoeg</div>
+          <div class="scannerHint">richt op de OLED</div>
         </div>
       </div>
       <canvas id="scanCanvas" width="128" height="64" hidden></canvas>
@@ -32,7 +32,7 @@
     </label>
 
     <p class="helpText">
-      Houd de OLED ongeveer recht en goed zichtbaar in beeld. Hij hoeft niet meer precies in het kader: de scanner zoekt zelf meerdere posities en groottes.
+      Richt de camera gewoon op de OLED. De scanner zoekt zelf waar het blauwe scherm zit, hoe groot het is, en probeert daaruit de code te lezen.
     </p>
 
     <div id="scanMessage" class="scannerMessage">Nog niet gescand.</div>
@@ -228,11 +228,164 @@
     return errors
   }
 
+  function percentile(values, p) {
+    if (!values.length) return 0
+    const sorted = values.slice().sort((a, b) => a - b)
+    return sorted[Math.max(0, Math.min(sorted.length - 1, Math.floor(sorted.length * p)))]
+  }
+
+  function blueSignalAt(data, width, x, y) {
+    const i = (y * width + x) * 4
+    const r = data[i]
+    const g = data[i + 1]
+    const b = data[i + 2]
+    const brightness = r * 0.299 + g * 0.587 + b * 0.114
+    // Voor jouw OLED is blauw het nuttigste signaal. De kleine brightness-factor helpt als de camera het blauw wat witter maakt.
+    return Math.max(b, brightness * 0.85) - Math.max(r, g) * 0.12
+  }
+
+  function detectBlueOledBox(videoWidth, videoHeight) {
+    const maxScanW = 320
+    const scanW = Math.min(maxScanW, videoWidth)
+    const scanH = Math.max(1, Math.round(scanW * videoHeight / videoWidth))
+
+    const detectorCanvas = detectBlueOledBox.canvas || (detectBlueOledBox.canvas = document.createElement('canvas'))
+    detectorCanvas.width = scanW
+    detectorCanvas.height = scanH
+    const dctx = detectorCanvas.getContext('2d', { willReadFrequently: true })
+    dctx.drawImage(video, 0, 0, scanW, scanH)
+
+    const image = dctx.getImageData(0, 0, scanW, scanH)
+    const data = image.data
+    const signals = []
+
+    for (let y = 0; y < scanH; y += 2) {
+      for (let x = 0; x < scanW; x += 2) {
+        signals.push(blueSignalAt(data, scanW, x, y))
+      }
+    }
+
+    const low = percentile(signals, 0.55)
+    const high = percentile(signals, 0.985)
+    const threshold = Math.max(28, low + (high - low) * 0.45)
+
+    const colHits = new Array(scanW).fill(0)
+    const rowHits = new Array(scanH).fill(0)
+    let totalHits = 0
+
+    for (let y = 0; y < scanH; y++) {
+      for (let x = 0; x < scanW; x++) {
+        const sig = blueSignalAt(data, scanW, x, y)
+        if (sig >= threshold) {
+          colHits[x]++
+          rowHits[y]++
+          totalHits++
+        }
+      }
+    }
+
+    if (totalHits < 24) return null
+
+    function smoothedRange(hits, length, minHits) {
+      const smooth = new Array(length).fill(0)
+      for (let i = 0; i < length; i++) {
+        let v = 0
+        for (let j = -3; j <= 3; j++) v += hits[clamp(i + j, 0, length - 1)] || 0
+        smooth[i] = v
+      }
+
+      let bestStart = -1
+      let bestEnd = -1
+      let curStart = -1
+      for (let i = 0; i < length; i++) {
+        if (smooth[i] >= minHits) {
+          if (curStart < 0) curStart = i
+        } else if (curStart >= 0) {
+          if (bestStart < 0 || i - curStart > bestEnd - bestStart) {
+            bestStart = curStart
+            bestEnd = i - 1
+          }
+          curStart = -1
+        }
+      }
+      if (curStart >= 0 && (bestStart < 0 || length - curStart > bestEnd - bestStart)) {
+        bestStart = curStart
+        bestEnd = length - 1
+      }
+      if (bestStart < 0) return null
+      return { start: bestStart, end: bestEnd }
+    }
+
+    // Drempel relatief laag houden: de HuttoCode heeft zwarte vakjes, dus niet iedere kolom/rij is vol licht.
+    const xRange = smoothedRange(colHits, scanW, Math.max(1, Math.round(scanH * 0.012)))
+    const yRange = smoothedRange(rowHits, scanH, Math.max(1, Math.round(scanW * 0.012)))
+    if (!xRange || !yRange) return null
+
+    let x = xRange.start * videoWidth / scanW
+    let y = yRange.start * videoHeight / scanH
+    let width = (xRange.end - xRange.start + 1) * videoWidth / scanW
+    let height = (yRange.end - yRange.start + 1) * videoHeight / scanH
+
+    if (width < videoWidth * 0.08 || height < videoHeight * 0.06) return null
+
+    return { x, y, width, height, threshold, hits: totalHits, scanW, scanH }
+  }
+
+  function addCandidate(candidates, x, y, width, height, videoWidth, videoHeight, source) {
+    if (width < 48 || height < 24) return
+    const ratio = width / height
+    if (ratio < 1.35 || ratio > 2.85) return
+
+    // De echte HuttoCode is 2:1. Als de gevonden OLED-box iets scheef/breed is, corrigeren we naar 2:1 rond hetzelfde midden.
+    const cx = x + width / 2
+    const cy = y + height / 2
+    let w = width
+    let h = height
+    if (w / h > 2) h = w / 2
+    else w = h * 2
+
+    x = clamp(Math.round(cx - w / 2), 0, Math.max(0, videoWidth - Math.round(w)))
+    y = clamp(Math.round(cy - h / 2), 0, Math.max(0, videoHeight - Math.round(h)))
+    w = Math.min(Math.round(w), videoWidth - x)
+    h = Math.min(Math.round(h), videoHeight - y)
+
+    const key = `${x},${y},${w},${h}`
+    if (!candidates.seen.has(key)) {
+      candidates.seen.add(key)
+      candidates.push({ x, y, width: w, height: h, source })
+    }
+  }
+
   function buildCandidateCrops(videoWidth, videoHeight) {
+    const candidates = []
+    candidates.seen = new Set()
+
+    const detected = detectBlueOledBox(videoWidth, videoHeight)
+
+    if (detected) {
+      const cx = detected.x + detected.width / 2
+      const cy = detected.y + detected.height / 2
+
+      // Belangrijk: de blauwe pixels zitten in blokken. We proberen daarom meerdere marges rond de gedetecteerde licht-box.
+      const scaleOptions = [1.00, 1.06, 1.12, 1.20, 1.30, 1.42, 0.94]
+      const shiftOptions = [
+        [0, 0], [-0.025, 0], [0.025, 0], [0, -0.035], [0, 0.035],
+        [-0.045, -0.045], [0.045, -0.045], [-0.045, 0.045], [0.045, 0.045]
+      ]
+
+      for (const scale of scaleOptions) {
+        const w = detected.width * scale
+        const h = detected.height * scale
+        for (const [sx, sy] of shiftOptions) {
+          addCandidate(candidates, cx - w / 2 + sx * w, cy - h / 2 + sy * h, w, h, videoWidth, videoHeight, 'oled-blue')
+        }
+      }
+    }
+
+    // Fallback als het blauwe vlak nog niet goed gevonden wordt: grove centrale zoekvlakken.
     const targetRatio = 2
     let baseWidth = videoWidth
     let baseHeight = Math.round(baseWidth / targetRatio)
-
     if (baseHeight > videoHeight) {
       baseHeight = videoHeight
       baseWidth = Math.round(baseHeight * targetRatio)
@@ -240,26 +393,20 @@
 
     const centerX = videoWidth / 2
     const centerY = videoHeight / 2
-    const scales = [0.96, 0.86, 0.76, 0.66, 0.56]
-    const xOffsets = [0, -0.10, 0.10, -0.20, 0.20]
-    const yOffsets = [0, -0.10, 0.10, -0.20, 0.20]
-    const candidates = []
+    const scales = [0.92, 0.78, 0.64, 0.52, 0.42, 0.34]
+    const offsets = [0, -0.16, 0.16, -0.30, 0.30]
 
     for (const scale of scales) {
       const width = Math.round(baseWidth * scale)
       const height = Math.round(width / targetRatio)
-      for (const oy of yOffsets) {
-        for (const ox of xOffsets) {
-          const cx = centerX + ox * baseWidth
-          const cy = centerY + oy * baseHeight
-          const x = clamp(Math.round(cx - width / 2), 0, videoWidth - width)
-          const y = clamp(Math.round(cy - height / 2), 0, videoHeight - height)
-          candidates.push({ x, y, width, height, scale, ox, oy })
+      for (const oy of offsets) {
+        for (const ox of offsets) {
+          addCandidate(candidates, centerX + ox * baseWidth - width / 2, centerY + oy * baseHeight - height / 2, width, height, videoWidth, videoHeight, 'fallback')
         }
       }
     }
 
-    // Grootste/middelste crops eerst. Bij gelijke score voelt dat stabieler.
+    candidates.detected = detected
     return candidates
   }
 
@@ -317,7 +464,8 @@
     const finderErrors = topErrors + bottomErrors
 
     // Finder is het belangrijkste. Contrast helpt alleen om slechte donkere crops te vermijden.
-    const score = (32 - finderErrors * 4) + Math.min(12, contrast / 8)
+    // Extra score op blauwe pixels in finder-rijen: exacte finder wint altijd, maar contrast voorkomt valse donkere crops.
+    const score = (64 - finderErrors * 8) + Math.min(18, contrast / 6) + (crop.source === 'oled-blue' ? 10 : 0)
     return { rows, crop, score, finderErrors, topErrors, bottomErrors, contrast }
   }
 
@@ -340,7 +488,7 @@
 
     if (best) {
       setDebug(best.rows)
-      debugRows.textContent = best.rows.join('\n') + `\n\nfinder-fouten: ${best.finderErrors}\ncontrast: ${Math.round(best.contrast)}\npositie: ${Math.round(best.crop.x)},${Math.round(best.crop.y)} ${Math.round(best.crop.width)}×${Math.round(best.crop.height)}`
+      debugRows.textContent = best.rows.join('\n') + `\n\nfinder-fouten: ${best.finderErrors}\ncontrast: ${Math.round(best.contrast)}\nbron: ${best.crop.source || 'onbekend'}\npositie: ${Math.round(best.crop.x)},${Math.round(best.crop.y)} ${Math.round(best.crop.width)}×${Math.round(best.crop.height)}`
     }
 
     return best
@@ -392,7 +540,7 @@
       }
 
       if (!finderLooksValid(rows)) {
-        setMessage(`Code wordt gezocht... beste poging heeft nog ${scan.finderErrors} finder-fout(en). Houd hem ongeveer recht en iets dichterbij.`, 'busy')
+        setMessage(`OLED/code wordt gezocht... beste poging heeft nog ${scan.finderErrors} finder-fout(en). Richt op de OLED en vul het beeld iets meer.`, 'busy')
         return
       }
 
