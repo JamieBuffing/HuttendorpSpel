@@ -13,130 +13,19 @@ const {
 
 const router = express.Router()
 
-function nibbleToHex(value) {
-  const clean = Number(value || 0) & 15
-  return clean < 10 ? String(clean) : String.fromCharCode(55 + clean)
-}
 
-function checksumHex(data) {
-  const total = String(data || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) % 16
-  return nibbleToHex(total)
-}
-
-function bitsToNibble(bits) {
-  return String(bits || '').split('').reduce((value, bit) => (value << 1) + (bit === '1' ? 1 : 0), 0) & 15
-}
-
-function normalizeBackupRows(rows) {
-  if (typeof rows === 'string') {
-    rows = rows
-      .split('\n')
-      .map((row) => row.trim())
-      .filter(Boolean)
-  }
-
-  if (!Array.isArray(rows)) throw new Error('Geen geldige coderegels ontvangen.')
-
-  return rows.map((row) => String(row || '').replace(/[^01]/g, ''))
-}
-
-function decodePayloadNibbles(nibbles) {
-  // Payload-indeling:
-  // positie 0: P, 1-2: postnummer, 3: antwoord, 4-22: UID/padding, laatste echte positie: checksum.
-  const postId = `p${nibbleToHex(nibbles[1])}${nibbleToHex(nibbles[2])}`.toLowerCase()
-  const answerMap = { 13: 'R', 12: 'G', 11: 'B' }
-  const answer = answerMap[nibbles[3]]
-
-  if (nibbleToHex(nibbles[0]) !== 'E') {
-    throw new Error('Startteken klopt niet. Dit lijkt geen HuttoCode payload.')
-  }
-
-  if (!answer) {
-    throw new Error('Antwoord kon niet worden gelezen.')
-  }
-
-  const uidAndChecksum = nibbles.slice(4).map(nibbleToHex).join('').toUpperCase()
-
-  // Arduino vult na checksum aan met nullen. Daarom zoeken we de checksumpositie
-  // door te testen waar de checksum voor Pxx + antwoord + UID klopt.
-  let match = null
-  for (let checksumIndex = 1; checksumIndex < uidAndChecksum.length; checksumIndex++) {
-    const uid = uidAndChecksum.slice(0, checksumIndex)
-    const checksum = uidAndChecksum.slice(checksumIndex, checksumIndex + 1)
-    const padding = uidAndChecksum.slice(checksumIndex + 1)
-    const expectedChecksum = checksumHex(`P${postId.slice(1).toUpperCase()}${answer}${uid}`)
-
-    if (checksum === expectedChecksum && /^0*$/.test(padding)) {
-      match = { uid, checksum }
-      break
-    }
-  }
-
+function decodeQrBackupCode(input) {
+  const code = String(input || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const match = code.match(/^(P\d{2})([RGB])([0-9A-F]{4,32})$/)
   if (!match) {
-    const fallbackUid = uidAndChecksum.slice(0, 19).replace(/0+$/, '')
-    const fallbackChecksum = uidAndChecksum.slice(19, 20) || '?'
-    throw new Error(`Checksum klopt niet. Gelezen payload: ${postId}/${answer}/${fallbackUid || '-'} checksum ${fallbackChecksum}.`)
+    throw new Error('Ongeldige QR-code. Verwacht formaat zoals P01R042A16BAFC2091.')
   }
-
-  if (!match.uid) throw new Error('UID ontbreekt in HuttoCode.')
-
-  return { postId, uid: match.uid, answer, checksum: match.checksum }
-}
-
-function decodeOldBackupRows(rows) {
-  if (rows.length !== 6) {
-    throw new Error('Oude backup-code heeft exact 6 coderegels nodig.')
+  return {
+    code,
+    postId: match[1].toLowerCase(),
+    answer: match[2],
+    uid: match[3]
   }
-
-  const nibbles = []
-  for (const row of rows) {
-    if (row.length !== 16) {
-      throw new Error('Elke oude coderegel moet 16 bits bevatten.')
-    }
-
-    for (let i = 0; i < 16; i += 4) {
-      nibbles.push(bitsToNibble(row.slice(i, i + 4)))
-    }
-  }
-
-  return decodePayloadNibbles(nibbles)
-}
-
-function decodeHuttoCodeRows(rows) {
-  const cleanRows = normalizeBackupRows(rows)
-
-  // Compatibiliteit: oude testcodes van 6 regels blijven werken.
-  if (cleanRows.length === 6) return decodeOldBackupRows(cleanRows)
-
-  if (cleanRows.length !== 8) {
-    throw new Error('HuttoCode v1 heeft exact 8 regels van 16 bits nodig.')
-  }
-
-  for (const row of cleanRows) {
-    if (row.length !== 16) {
-      throw new Error('Elke HuttoCode-regel moet 16 bits bevatten.')
-    }
-  }
-
-  const topFinder = '1111000010101111'
-  const bottomFinder = '1001111001111001'
-
-  if (cleanRows[0] !== topFinder) {
-    throw new Error('Bovenste herkenningsrij klopt niet. Houd de OLED rechter en volledig in het kader.')
-  }
-
-  if (cleanRows[7] !== bottomFinder) {
-    throw new Error('Onderste herkenningsrij klopt niet. Houd de OLED rechter en volledig in het kader.')
-  }
-
-  const payloadBits = cleanRows.slice(1, 7).join('')
-  const nibbles = []
-
-  for (let i = 0; i < payloadBits.length; i += 4) {
-    nibbles.push(bitsToNibble(payloadBits.slice(i, i + 4)))
-  }
-
-  return decodePayloadNibbles(nibbles)
 }
 
 router.get('/', (req, res) => res.redirect('/dashboard'))
@@ -217,19 +106,10 @@ router.get('/import', requireLogin, (req, res) => {
 
 router.post('/import/scan-code', requireLogin, async (req, res) => {
   try {
-    const decoded = decodeHuttoCodeRows(req.body.rows)
+    const decoded = decodeQrBackupCode(req.body.code)
 
-    if (req.body.dryRun === true || req.body.dryRun === 'true') {
-      return res.json({
-        ok: true,
-        dryRun: true,
-        decoded,
-        result: {
-          ok: true,
-          questionTitle: 'Testmodus: code is goed gelezen, niets opgeslagen.'
-        },
-        alreadyAnswered: false
-      })
+    if (req.body.testOnly === true || req.body.testOnly === 'true') {
+      return res.json({ ok: true, testOnly: true, decoded })
     }
 
     const result = await saveAnswerFromEsp({
@@ -249,22 +129,14 @@ router.post('/import/scan-code', requireLogin, async (req, res) => {
   } catch (error) {
     res.status(400).json({
       ok: false,
-      error: error.message || 'Backup-code kon niet worden gelezen.'
+      error: error.message || 'QR-code kon niet worden verwerkt.'
     })
   }
 })
 
 router.post('/import', requireLogin, async (req, res) => {
   try {
-    let rows = req.body.rows
-    if (typeof rows === 'string') {
-      rows = rows
-        .split('\n')
-        .map((row) => row.trim())
-        .filter(Boolean)
-    }
-
-    const decoded = decodeHuttoCodeRows(rows)
+    const decoded = decodeQrBackupCode(req.body.code)
     const result = await saveAnswerFromEsp({
       postId: decoded.postId,
       teamId: decoded.uid,
@@ -280,7 +152,7 @@ router.post('/import', requireLogin, async (req, res) => {
   } catch (error) {
     res.status(400).render('pages/import', {
       result: null,
-      error: error.message || 'Backup-code kon niet worden gelezen.'
+      error: error.message || 'QR-code kon niet worden verwerkt.'
     })
   }
 })

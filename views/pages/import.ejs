@@ -1,565 +1,179 @@
-<%- include('../partials/page-shell-start', { title: 'HuttoCode scanner' }); %>
+<%- include('../partials/page-shell-start', { title: 'QR backup scanner' }); %>
 
 <section class="panel">
-  <h1>HuttoCode scanner</h1>
-  <p>Scan hier de 16×8 backup-code van het OLED-scherm van een postbox. De scanner zoekt automatisch het blauwe OLED-vlak in beeld en leest daarna de 16×8 HuttoCode.</p>
+  <h1>QR backup scanner</h1>
+  <p>Scan de QR-code op het OLED-scherm. De code heeft dit formaat: <code>P01R042A16BAFC2091</code>.</p>
 
   <% if (error) { %>
     <p class="error"><%= error %></p>
   <% } %>
 
-  <div class="backupScanner">
-    <div class="scannerVideoWrap">
-      <video id="backupVideo" playsinline muted></video>
-      <div class="scannerOverlay">
-        <div class="scannerFrame">
-          <div class="scannerGrid"></div>
-          <div class="scannerHint">richt op de OLED</div>
-        </div>
-      </div>
-      <canvas id="scanCanvas" width="128" height="64" hidden></canvas>
-    </div>
-
-    <div class="scannerControls">
-      <button class="button" type="button" id="startCameraBtn">Camera starten</button>
-      <button class="button secondary" type="button" id="scanOnceBtn" disabled>Scan nu</button>
-      <button class="button secondary" type="button" id="stopCameraBtn" disabled>Camera stoppen</button>
-    </div>
-
-    <label class="dryRunToggle">
-      <input type="checkbox" id="dryRunToggle" checked>
-      Alleen testen/lezen, nog niet opslaan
-    </label>
-
-    <p class="helpText">
-      Richt de camera gewoon op de OLED. De scanner zoekt zelf waar het blauwe scherm zit, hoe groot het is, en probeert daaruit de code te lezen.
-    </p>
-
-    <div id="scanMessage" class="scannerMessage">Nog niet gescand.</div>
-
-    <section class="huttoDebug" aria-label="Scanner debug">
-      <div>
-        <h2>Live gelezen grid</h2>
-        <div id="debugGrid" class="debugGrid" aria-label="16 bij 8 HuttoCode grid"></div>
-      </div>
-      <div>
-        <h2>Laatste regels</h2>
-        <pre id="debugRows" class="debugRows">-</pre>
-      </div>
+  <% if (result) { %>
+    <section class="notice success">
+      <h2>Import verwerkt</h2>
+      <p><strong>Post:</strong> <%= result.decoded.postId %></p>
+      <p><strong>Antwoord:</strong> <%= result.decoded.answer %></p>
+      <p><strong>UID:</strong> <%= result.decoded.uid %></p>
     </section>
-
-    <details class="manualFallback">
-      <summary>Handmatig testen met 8 bitregels</summary>
-      <form method="post" action="/import" class="formStack">
-        <label>8 regels van 16 bits
-          <textarea name="rows" rows="9" placeholder="1111000010101111&#10;1110000000011011&#10;1100110000000001&#10;1000000000000010&#10;0000000000000000&#10;0000000000000000&#10;0000000000000000&#10;1001111001111001"></textarea>
-        </label>
-        <button class="button" type="submit">Handmatig importeren</button>
-      </form>
-    </details>
-  </div>
+  <% } %>
 </section>
 
-<% if (result) { %>
-  <section class="panel">
-    <h2>Import resultaat</h2>
-    <table class="dataTable">
-      <tbody>
-        <tr><th>Post</th><td><%= result.decoded.postId %></td></tr>
-        <tr><th>UID</th><td><%= result.decoded.uid %></td></tr>
-        <tr><th>Antwoord</th><td><%= result.decoded.answer %></td></tr>
-        <tr><th>Status</th><td><%= result.result.ok ? 'Opgeslagen' : (result.result.alreadyAnswered ? 'Al gedaan' : 'Niet opgeslagen') %></td></tr>
-        <tr><th>Melding</th><td><%= result.result.questionTitle || result.result.error || '-' %></td></tr>
-      </tbody>
-    </table>
-  </section>
-<% } %>
+<section class="panel qrScannerPanel">
+  <div class="sectionHeader">
+    <div>
+      <h2>Camera scanner</h2>
+      <p>Richt de camera op de QR-code. Je hoeft geen kader precies te raken; de QR-library zoekt de code zelf.</p>
+    </div>
+  </div>
+
+  <div class="scannerControls">
+    <button class="button" id="startScanner" type="button">Camera starten</button>
+    <button class="button secondary" id="stopScanner" type="button" disabled>Stoppen</button>
+    <label class="checkboxLine"><input type="checkbox" id="testOnly" checked> Alleen testen/lezen, nog niet opslaan</label>
+  </div>
+
+  <div class="qrVideoWrap">
+    <video id="qrVideo" muted playsinline></video>
+  </div>
+
+  <div class="scanStatus" id="scanStatus">Nog geen scan.</div>
+  <pre class="scanDebug" id="scanDebug"></pre>
+</section>
+
+<section class="panel">
+  <h2>Handmatig invoeren</h2>
+  <form method="post" action="/import" class="gridForm two">
+    <label>Code
+      <input name="code" id="manualCode" placeholder="P01R042A16BAFC2091" autocomplete="off">
+    </label>
+    <button class="button" type="submit">Code importeren</button>
+  </form>
+</section>
 
 <style>
-  .backupScanner { display: grid; gap: 1rem; }
-  .scannerVideoWrap {
-    position: relative;
-    width: min(100%, 760px);
-    margin: 0 auto;
-    background: #050505;
-    border-radius: 16px;
-    overflow: hidden;
-    aspect-ratio: 2 / 1;
-  }
-  #backupVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .scannerOverlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
-  .scannerFrame {
-    position: relative;
-    width: 86%;
-    aspect-ratio: 2 / 1;
-    border: 3px dashed #00ff88;
-    border-radius: 8px;
-    box-shadow: 0 0 0 999px rgba(0,0,0,.18);
-    overflow: hidden;
-  }
-  .scannerGrid {
-    position: absolute;
-    inset: 0;
-    opacity: .55;
-    background-image:
-      linear-gradient(to right, rgba(0,255,136,.22) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(0,255,136,.22) 1px, transparent 1px);
-    background-size: 6.25% 12.5%;
-  }
-  .scannerHint { position: absolute; left: 0; right: 0; bottom: .35rem; text-align: center; color: #00ff88; font-size: .85rem; font-weight: 800; text-shadow: 0 1px 4px #000; }
-  .scannerControls { display: flex; gap: .75rem; flex-wrap: wrap; justify-content: center; }
-  .dryRunToggle { display: flex; gap: .5rem; align-items: center; justify-content: center; font-weight: 700; }
-  .scannerMessage { padding: .9rem 1rem; border-radius: 12px; background: #111; color: #fff; text-align: center; font-weight: 700; }
-  .scannerMessage.ok { background: #063; }
-  .scannerMessage.error { background: #700; }
-  .scannerMessage.busy { background: #665000; }
-  .manualFallback { margin-top: .5rem; }
-  .huttoDebug { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; gap: 1rem; align-items: start; }
-  .huttoDebug h2 { margin: 0 0 .5rem; font-size: 1rem; }
-  .debugGrid {
-    display: grid;
-    grid-template-columns: repeat(16, 1fr);
-    grid-template-rows: repeat(8, 1fr);
-    gap: 2px;
-    background: #050505;
-    border: 1px solid #333;
-    border-radius: 10px;
-    padding: 6px;
-    aspect-ratio: 2 / 1;
-  }
-  .debugCell { background: #050505; border-radius: 2px; min-width: 6px; min-height: 6px; }
-  .debugCell.on { background: #18a8ff; box-shadow: 0 0 8px rgba(24,168,255,.55); }
-  .debugRows { min-height: 8rem; white-space: pre-wrap; word-break: break-all; background: #111; color: #fff; padding: .75rem; border-radius: 10px; overflow: auto; }
-  @media (max-width: 720px) { .huttoDebug { grid-template-columns: 1fr; } }
+  .qrScannerPanel video { width: 100%; max-height: 70vh; background: #000; border-radius: 16px; object-fit: cover; }
+  .qrVideoWrap { overflow: hidden; border-radius: 16px; border: 1px solid rgba(255,255,255,.15); background:#000; }
+  .scannerControls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:12px 0; }
+  .checkboxLine { display:flex; align-items:center; gap:8px; }
+  .scanStatus { margin-top:12px; padding:12px; border-radius:12px; background:rgba(255,255,255,.08); font-weight:700; }
+  .scanStatus.ok { background:rgba(0,180,90,.16); }
+  .scanStatus.warn { background:rgba(255,180,0,.18); }
+  .scanStatus.error { background:rgba(255,0,0,.14); }
+  .scanDebug { white-space:pre-wrap; overflow-wrap:anywhere; background:rgba(0,0,0,.35); padding:12px; border-radius:12px; min-height:70px; }
 </style>
 
-<script>
-(() => {
-  const HUTTO_COLS = 16
-  const HUTTO_ROWS = 8
-  const TOP_FINDER = '1111000010101111'
-  const BOTTOM_FINDER = '1001111001111001'
+<script type="module">
+  import QrScanner from 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.min.js';
 
-  const video = document.getElementById('backupVideo')
-  const canvas = document.getElementById('scanCanvas')
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  const startBtn = document.getElementById('startCameraBtn')
-  const scanBtn = document.getElementById('scanOnceBtn')
-  const stopBtn = document.getElementById('stopCameraBtn')
-  const message = document.getElementById('scanMessage')
-  const debugGrid = document.getElementById('debugGrid')
-  const debugRows = document.getElementById('debugRows')
-  const dryRunToggle = document.getElementById('dryRunToggle')
+  const video = document.getElementById('qrVideo');
+  const statusEl = document.getElementById('scanStatus');
+  const debugEl = document.getElementById('scanDebug');
+  const startBtn = document.getElementById('startScanner');
+  const stopBtn = document.getElementById('stopScanner');
+  const testOnlyEl = document.getElementById('testOnly');
+  const manualCodeEl = document.getElementById('manualCode');
 
-  let stream = null
-  let scanTimer = null
-  let lastSubmittedRows = ''
-  let stableRows = ''
-  let stableCount = 0
-  let lastSubmitAt = 0
+  let scanner = null;
+  let lastCode = '';
+  let stableCount = 0;
+  let busy = false;
 
-  for (let i = 0; i < HUTTO_COLS * HUTTO_ROWS; i++) {
-    const cell = document.createElement('div')
-    cell.className = 'debugCell'
-    debugGrid.appendChild(cell)
+  function setStatus(text, cls = '') {
+    statusEl.textContent = text;
+    statusEl.className = 'scanStatus' + (cls ? ' ' + cls : '');
   }
 
-  function setMessage(text, type = '') {
-    message.textContent = text
-    message.className = 'scannerMessage ' + type
+  function normalizeCode(raw) {
+    return String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   }
 
-  function setDebug(rows) {
-    const cells = debugGrid.children
-    const joined = Array.isArray(rows) ? rows.join('\n') : '-'
-    debugRows.textContent = joined
-
-    for (let row = 0; row < HUTTO_ROWS; row++) {
-      const line = rows?.[row] || ''.padEnd(HUTTO_COLS, '0')
-      for (let col = 0; col < HUTTO_COLS; col++) {
-        cells[row * HUTTO_COLS + col].classList.toggle('on', line[col] === '1')
-      }
+  function decodeCode(raw) {
+    const code = normalizeCode(raw);
+    const match = code.match(/^(P\d{2})([RGB])([0-9A-F]{4,32})$/);
+    if (!match) {
+      throw new Error('Ongeldig formaat. Verwacht bijvoorbeeld P01R042A16BAFC2091');
     }
+    return { code, postId: match[1].toLowerCase(), answer: match[2], uid: match[3] };
   }
 
-  function stopCamera() {
-    if (scanTimer) window.clearInterval(scanTimer)
-    scanTimer = null
-    if (stream) stream.getTracks().forEach((track) => track.stop())
-    stream = null
-    video.srcObject = null
-    scanBtn.disabled = true
-    stopBtn.disabled = true
-    startBtn.disabled = false
-  }
-
-  async function startCamera() {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      })
-      video.srcObject = stream
-      await video.play()
-      scanBtn.disabled = false
-      stopBtn.disabled = false
-      startBtn.disabled = true
-      stableRows = ''
-      stableCount = 0
-      setMessage('Camera gestart. Houd de OLED ongeveer recht en duidelijk in beeld.', 'busy')
-      scanTimer = window.setInterval(scanAndMaybeSubmit, 350)
-    } catch (error) {
-      setMessage('Camera kon niet starten: ' + (error.message || error), 'error')
-    }
-  }
-
-  function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value))
-  }
-
-  function hamming(a, b) {
-    if (!a || !b || a.length !== b.length) return 999
-    let errors = 0
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) errors++
-    return errors
-  }
-
-  function percentile(values, p) {
-    if (!values.length) return 0
-    const sorted = values.slice().sort((a, b) => a - b)
-    return sorted[Math.max(0, Math.min(sorted.length - 1, Math.floor(sorted.length * p)))]
-  }
-
-  function blueSignalAt(data, width, x, y) {
-    const i = (y * width + x) * 4
-    const r = data[i]
-    const g = data[i + 1]
-    const b = data[i + 2]
-    const brightness = r * 0.299 + g * 0.587 + b * 0.114
-    // Voor jouw OLED is blauw het nuttigste signaal. De kleine brightness-factor helpt als de camera het blauw wat witter maakt.
-    return Math.max(b, brightness * 0.85) - Math.max(r, g) * 0.12
-  }
-
-  function detectBlueOledBox(videoWidth, videoHeight) {
-    const maxScanW = 320
-    const scanW = Math.min(maxScanW, videoWidth)
-    const scanH = Math.max(1, Math.round(scanW * videoHeight / videoWidth))
-
-    const detectorCanvas = detectBlueOledBox.canvas || (detectBlueOledBox.canvas = document.createElement('canvas'))
-    detectorCanvas.width = scanW
-    detectorCanvas.height = scanH
-    const dctx = detectorCanvas.getContext('2d', { willReadFrequently: true })
-    dctx.drawImage(video, 0, 0, scanW, scanH)
-
-    const image = dctx.getImageData(0, 0, scanW, scanH)
-    const data = image.data
-    const signals = []
-
-    for (let y = 0; y < scanH; y += 2) {
-      for (let x = 0; x < scanW; x += 2) {
-        signals.push(blueSignalAt(data, scanW, x, y))
-      }
-    }
-
-    const low = percentile(signals, 0.55)
-    const high = percentile(signals, 0.985)
-    const threshold = Math.max(28, low + (high - low) * 0.45)
-
-    const colHits = new Array(scanW).fill(0)
-    const rowHits = new Array(scanH).fill(0)
-    let totalHits = 0
-
-    for (let y = 0; y < scanH; y++) {
-      for (let x = 0; x < scanW; x++) {
-        const sig = blueSignalAt(data, scanW, x, y)
-        if (sig >= threshold) {
-          colHits[x]++
-          rowHits[y]++
-          totalHits++
-        }
-      }
-    }
-
-    if (totalHits < 24) return null
-
-    function smoothedRange(hits, length, minHits) {
-      const smooth = new Array(length).fill(0)
-      for (let i = 0; i < length; i++) {
-        let v = 0
-        for (let j = -3; j <= 3; j++) v += hits[clamp(i + j, 0, length - 1)] || 0
-        smooth[i] = v
-      }
-
-      let bestStart = -1
-      let bestEnd = -1
-      let curStart = -1
-      for (let i = 0; i < length; i++) {
-        if (smooth[i] >= minHits) {
-          if (curStart < 0) curStart = i
-        } else if (curStart >= 0) {
-          if (bestStart < 0 || i - curStart > bestEnd - bestStart) {
-            bestStart = curStart
-            bestEnd = i - 1
-          }
-          curStart = -1
-        }
-      }
-      if (curStart >= 0 && (bestStart < 0 || length - curStart > bestEnd - bestStart)) {
-        bestStart = curStart
-        bestEnd = length - 1
-      }
-      if (bestStart < 0) return null
-      return { start: bestStart, end: bestEnd }
-    }
-
-    // Drempel relatief laag houden: de HuttoCode heeft zwarte vakjes, dus niet iedere kolom/rij is vol licht.
-    const xRange = smoothedRange(colHits, scanW, Math.max(1, Math.round(scanH * 0.012)))
-    const yRange = smoothedRange(rowHits, scanH, Math.max(1, Math.round(scanW * 0.012)))
-    if (!xRange || !yRange) return null
-
-    let x = xRange.start * videoWidth / scanW
-    let y = yRange.start * videoHeight / scanH
-    let width = (xRange.end - xRange.start + 1) * videoWidth / scanW
-    let height = (yRange.end - yRange.start + 1) * videoHeight / scanH
-
-    if (width < videoWidth * 0.08 || height < videoHeight * 0.06) return null
-
-    return { x, y, width, height, threshold, hits: totalHits, scanW, scanH }
-  }
-
-  function addCandidate(candidates, x, y, width, height, videoWidth, videoHeight, source) {
-    if (width < 48 || height < 24) return
-    const ratio = width / height
-    if (ratio < 1.35 || ratio > 2.85) return
-
-    // De echte HuttoCode is 2:1. Als de gevonden OLED-box iets scheef/breed is, corrigeren we naar 2:1 rond hetzelfde midden.
-    const cx = x + width / 2
-    const cy = y + height / 2
-    let w = width
-    let h = height
-    if (w / h > 2) h = w / 2
-    else w = h * 2
-
-    x = clamp(Math.round(cx - w / 2), 0, Math.max(0, videoWidth - Math.round(w)))
-    y = clamp(Math.round(cy - h / 2), 0, Math.max(0, videoHeight - Math.round(h)))
-    w = Math.min(Math.round(w), videoWidth - x)
-    h = Math.min(Math.round(h), videoHeight - y)
-
-    const key = `${x},${y},${w},${h}`
-    if (!candidates.seen.has(key)) {
-      candidates.seen.add(key)
-      candidates.push({ x, y, width: w, height: h, source })
-    }
-  }
-
-  function buildCandidateCrops(videoWidth, videoHeight) {
-    const candidates = []
-    candidates.seen = new Set()
-
-    const detected = detectBlueOledBox(videoWidth, videoHeight)
-
-    if (detected) {
-      const cx = detected.x + detected.width / 2
-      const cy = detected.y + detected.height / 2
-
-      // Belangrijk: de blauwe pixels zitten in blokken. We proberen daarom meerdere marges rond de gedetecteerde licht-box.
-      const scaleOptions = [1.00, 1.06, 1.12, 1.20, 1.30, 1.42, 0.94]
-      const shiftOptions = [
-        [0, 0], [-0.025, 0], [0.025, 0], [0, -0.035], [0, 0.035],
-        [-0.045, -0.045], [0.045, -0.045], [-0.045, 0.045], [0.045, 0.045]
-      ]
-
-      for (const scale of scaleOptions) {
-        const w = detected.width * scale
-        const h = detected.height * scale
-        for (const [sx, sy] of shiftOptions) {
-          addCandidate(candidates, cx - w / 2 + sx * w, cy - h / 2 + sy * h, w, h, videoWidth, videoHeight, 'oled-blue')
-        }
-      }
-    }
-
-    // Fallback als het blauwe vlak nog niet goed gevonden wordt: grove centrale zoekvlakken.
-    const targetRatio = 2
-    let baseWidth = videoWidth
-    let baseHeight = Math.round(baseWidth / targetRatio)
-    if (baseHeight > videoHeight) {
-      baseHeight = videoHeight
-      baseWidth = Math.round(baseHeight * targetRatio)
-    }
-
-    const centerX = videoWidth / 2
-    const centerY = videoHeight / 2
-    const scales = [0.92, 0.78, 0.64, 0.52, 0.42, 0.34]
-    const offsets = [0, -0.16, 0.16, -0.30, 0.30]
-
-    for (const scale of scales) {
-      const width = Math.round(baseWidth * scale)
-      const height = Math.round(width / targetRatio)
-      for (const oy of offsets) {
-        for (const ox of offsets) {
-          addCandidate(candidates, centerX + ox * baseWidth - width / 2, centerY + oy * baseHeight - height / 2, width, height, videoWidth, videoHeight, 'fallback')
-        }
-      }
-    }
-
-    candidates.detected = detected
-    return candidates
-  }
-
-  function readRowsFromCrop(crop) {
-    ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, 128, 64)
-
-    const image = ctx.getImageData(0, 0, 128, 64)
-    const data = image.data
-    const signal = []
-    const samples = []
-
-    for (let y = 0; y < 64; y++) {
-      signal[y] = []
-      for (let x = 0; x < 128; x++) {
-        const i = (y * 128 + x) * 4
-        const r = data[i]
-        const g = data[i + 1]
-        const b = data[i + 2]
-        const brightness = r * 0.299 + g * 0.587 + b * 0.114
-        const blueBoostedSignal = Math.max(brightness, b * 0.95)
-        signal[y][x] = blueBoostedSignal
-        if (x % 2 === 0 && y % 2 === 0) samples.push(blueBoostedSignal)
-      }
-    }
-
-    samples.sort((a, b) => a - b)
-    const low = samples[Math.floor(samples.length * 0.18)] || 0
-    const high = samples[Math.floor(samples.length * 0.92)] || 255
-    const contrast = high - low
-    const threshold = Math.max(24, low + contrast * 0.48)
-
-    const rows = []
-    for (let row = 0; row < HUTTO_ROWS; row++) {
-      let line = ''
-      for (let col = 0; col < HUTTO_COLS; col++) {
-        const x0 = col * 8 + 2
-        const y0 = row * 8 + 2
-        let total = 0
-        let on = 0
-
-        for (let yy = y0; yy < y0 + 4; yy++) {
-          for (let xx = x0; xx < x0 + 4; xx++) {
-            total++
-            if (signal[yy]?.[xx] > threshold) on++
-          }
-        }
-
-        line += on / total > 0.45 ? '1' : '0'
-      }
-      rows.push(line)
-    }
-
-    const topErrors = hamming(rows[0], TOP_FINDER)
-    const bottomErrors = hamming(rows[7], BOTTOM_FINDER)
-    const finderErrors = topErrors + bottomErrors
-
-    // Finder is het belangrijkste. Contrast helpt alleen om slechte donkere crops te vermijden.
-    // Extra score op blauwe pixels in finder-rijen: exacte finder wint altijd, maar contrast voorkomt valse donkere crops.
-    const score = (64 - finderErrors * 8) + Math.min(18, contrast / 6) + (crop.source === 'oled-blue' ? 10 : 0)
-    return { rows, crop, score, finderErrors, topErrors, bottomErrors, contrast }
-  }
-
-  function readRowsFromFrame() {
-    if (!video.videoWidth || !video.videoHeight) return null
-
-    const candidates = buildCandidateCrops(video.videoWidth, video.videoHeight)
-    let best = null
-
-    for (const crop of candidates) {
-      const result = readRowsFromCrop(crop)
-      if (!best || result.score > best.score) best = result
-
-      // Exacte finder gevonden: genoeg, nu niet onnodig 100 extra crops proberen.
-      if (result.finderErrors === 0 && result.contrast > 18) {
-        best = result
-        break
-      }
-    }
-
-    if (best) {
-      setDebug(best.rows)
-      debugRows.textContent = best.rows.join('\n') + `\n\nfinder-fouten: ${best.finderErrors}\ncontrast: ${Math.round(best.contrast)}\nbron: ${best.crop.source || 'onbekend'}\npositie: ${Math.round(best.crop.x)},${Math.round(best.crop.y)} ${Math.round(best.crop.width)}×${Math.round(best.crop.height)}`
-    }
-
-    return best
-  }
-
-  function finderLooksValid(rows) {
-    if (!rows || rows.length !== 8) return false
-    return rows[0] === TOP_FINDER && rows[7] === BOTTOM_FINDER
-  }
-
-  async function submitRows(rows) {
-    const key = rows.join('|')
-    if (key === lastSubmittedRows && Date.now() - lastSubmitAt < 4500) return
-
-    lastSubmittedRows = key
-    lastSubmitAt = Date.now()
-    setMessage('Code stabiel gelezen, importeren...', 'busy')
-
+  async function submitCode(decoded) {
     const response = await fetch('/import/scan-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows, dryRun: dryRunToggle.checked })
-    })
-
-    const result = await response.json()
-
-    if (!response.ok || !result.ok) {
-      setMessage(result.error || result.result?.error || 'Import mislukt. Probeer opnieuw.', 'error')
-      return
+      body: JSON.stringify({ code: decoded.code, testOnly: testOnlyEl.checked })
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || !json.ok) {
+      throw new Error(json.error || 'Opslaan is mislukt.');
     }
-
-    const decoded = result.decoded
-    const status = result.dryRun ? 'alleen gelezen' : (result.alreadyAnswered ? 'al gedaan' : 'opgeslagen')
-    setMessage(`Gelukt: ${decoded.postId} / ${decoded.uid} / ${decoded.answer} (${status})`, 'ok')
+    return json;
   }
 
-  async function scanAndMaybeSubmit() {
+  async function onScan(result) {
+    const raw = typeof result === 'string' ? result : result?.data;
+    let decoded;
     try {
-      const scan = readRowsFromFrame()
-      if (!scan) return
-
-      const rows = scan.rows
-      const key = rows.join('|')
-      if (key === stableRows) {
-        stableCount++
-      } else {
-        stableRows = key
-        stableCount = 1
-      }
-
-      if (!finderLooksValid(rows)) {
-        setMessage(`OLED/code wordt gezocht... beste poging heeft nog ${scan.finderErrors} finder-fout(en). Richt op de OLED en vul het beeld iets meer.`, 'busy')
-        return
-      }
-
-      if (stableCount < 2) {
-        setMessage('Code gevonden. Even stabiel houden...', 'busy')
-        return
-      }
-
-      await submitRows(rows)
+      decoded = decodeCode(raw);
     } catch (error) {
-      setMessage(error.message || 'Nog geen geldige code gelezen.', 'error')
+      setStatus(error.message, 'error');
+      debugEl.textContent = `Gelezen: ${raw || '(leeg)'}`;
+      return;
+    }
+
+    if (decoded.code === lastCode) stableCount += 1;
+    else { lastCode = decoded.code; stableCount = 1; }
+
+    manualCodeEl.value = decoded.code;
+    debugEl.textContent = JSON.stringify({ gelezen: decoded.code, postId: decoded.postId, antwoord: decoded.answer, uid: decoded.uid, stabiel: stableCount, testOnly: testOnlyEl.checked }, null, 2);
+
+    if (stableCount < 2) {
+      setStatus(`QR gezien: ${decoded.code} — nog 1 stabiele scan nodig`, 'warn');
+      return;
+    }
+
+    if (busy) return;
+    busy = true;
+    try {
+      const saved = await submitCode(decoded);
+      if (testOnlyEl.checked) {
+        setStatus(`TEST OK: ${decoded.code}`, 'ok');
+      } else {
+        setStatus(saved.alreadyAnswered ? `Al bekend: ${decoded.code}` : `Opgeslagen: ${decoded.code}`, 'ok');
+      }
+    } catch (error) {
+      setStatus(error.message, 'error');
+    } finally {
+      setTimeout(() => { busy = false; stableCount = 0; lastCode = ''; }, 900);
     }
   }
 
-  startBtn.addEventListener('click', startCamera)
-  scanBtn.addEventListener('click', scanAndMaybeSubmit)
-  stopBtn.addEventListener('click', stopCamera)
-  window.addEventListener('pagehide', stopCamera)
-})()
+  async function startScanner() {
+    if (scanner) return;
+    scanner = new QrScanner(video, onScan, {
+      preferredCamera: 'environment',
+      returnDetailedScanResult: true,
+      highlightScanRegion: true,
+      highlightCodeOutline: true,
+      maxScansPerSecond: 8
+    });
+    await scanner.start();
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    setStatus('Camera actief. Richt op de OLED QR-code.');
+  }
+
+  function stopScanner() {
+    if (!scanner) return;
+    scanner.stop();
+    scanner.destroy();
+    scanner = null;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    setStatus('Scanner gestopt.');
+  }
+
+  startBtn.addEventListener('click', () => startScanner().catch(error => setStatus(error.message || 'Camera starten mislukt.', 'error')));
+  stopBtn.addEventListener('click', stopScanner);
 </script>
 
 <%- include('../partials/page-shell-end'); %>
