@@ -57,65 +57,112 @@ function nibbleToHex(value) {
 
 function decodeBackupBits(rawBits) {
   const bits = String(rawBits || '').replace(/[^01]/g, '')
+
   if (bits.length < TOTAL_BACKUP_BITS) {
-    return { ok: false, error: `Te weinig bits ontvangen (${bits.length}/${TOTAL_BACKUP_BITS})`, bits }
+    return {
+      ok: false,
+      error: `Te weinig bits ontvangen (${bits.length}/${TOTAL_BACKUP_BITS})`,
+      bits
+    }
   }
 
   const usedBits = bits.slice(0, TOTAL_BACKUP_BITS)
-  const values = []
+  const allValues = []
 
   for (let i = 0; i + 3 < usedBits.length; i += 4) {
-    values.push(parseInt(usedBits.slice(i, i + 4), 2))
+    allValues.push(parseInt(usedBits.slice(i, i + 4), 2))
   }
 
-  if (values.length < 6) {
-    return { ok: false, error: 'Code is te kort', bits: usedBits }
+  if (allValues.length < 6) {
+    return {
+      ok: false,
+      error: 'Code is te kort',
+      bits: usedBits,
+      values: allValues
+    }
   }
 
-  const postPrefix = values[0]
-  if (postPrefix !== 14) {
-    return { ok: false, error: 'Post-prefix P niet herkend', bits: usedBits, values }
-  }
-
-  const postDigit1 = values[1]
-  const postDigit2 = values[2]
-  if (postDigit1 > 9 || postDigit2 > 9) {
-    return { ok: false, error: 'Postnummer niet herkend', bits: usedBits, values }
-  }
-
-  const answerValue = values[3]
-  const answer = answerValue === 13 ? 'R' : answerValue === 12 ? 'G' : answerValue === 11 ? 'B' : null
-  if (!answer) {
-    return { ok: false, error: 'Antwoordkleur niet herkend', bits: usedBits, values }
-  }
-
-  const postId = `p${postDigit1}${postDigit2}`
   const candidates = []
-  const maxUidLength = Math.min(17, values.length - 5)
 
-  for (let uidLength = 4; uidLength <= maxUidLength; uidLength++) {
-    const uidValues = values.slice(4, 4 + uidLength)
-    const checksumValue = values[4 + uidLength]
-    if (checksumValue === undefined) continue
+  for (let offset = 0; offset < allValues.length; offset++) {
+    const values = allValues.slice(offset)
 
-    const uid = uidValues.map(nibbleToHex).join('')
-    const rawPayload = `P${postDigit1}${postDigit2}${answer}${uid}`
-    const expectedChecksum = calculateBackupChecksum(rawPayload)
-    const receivedChecksum = nibbleToHex(checksumValue)
+    if (values.length < 6) continue
 
-    if (expectedChecksum === receivedChecksum) {
-      candidates.push({ postId, uid, answer, checksum: receivedChecksum, uidLength, rawPayload })
+    const postPrefix = values[0]
+
+    if (postPrefix !== 14) {
+      continue
+    }
+
+    const postDigit1 = values[1]
+    const postDigit2 = values[2]
+
+    if (postDigit1 > 9 || postDigit2 > 9) {
+      continue
+    }
+
+    const answerValue = values[3]
+    const answer =
+      answerValue === 13 ? 'R' :
+      answerValue === 12 ? 'G' :
+      answerValue === 11 ? 'B' :
+      null
+
+    if (!answer) {
+      continue
+    }
+
+    const postId = `p${postDigit1}${postDigit2}`
+    const maxUidLength = Math.min(17, values.length - 5)
+
+    for (let uidLength = 4; uidLength <= maxUidLength; uidLength++) {
+      const uidValues = values.slice(4, 4 + uidLength)
+      const checksumValue = values[4 + uidLength]
+
+      if (checksumValue === undefined) continue
+
+      const uid = uidValues.map(nibbleToHex).join('')
+      const rawPayload = `P${postDigit1}${postDigit2}${answer}${uid}`
+      const expectedChecksum = calculateBackupChecksum(rawPayload)
+      const receivedChecksum = nibbleToHex(checksumValue)
+
+      if (expectedChecksum === receivedChecksum) {
+        candidates.push({
+          postId,
+          uid,
+          answer,
+          checksum: receivedChecksum,
+          uidLength,
+          rawPayload,
+          offset
+        })
+      }
     }
   }
 
   if (!candidates.length) {
-    return { ok: false, error: 'Checksum klopt niet', bits: usedBits, values }
+    return {
+      ok: false,
+      error: 'Checksum klopt niet of P-start niet gevonden',
+      bits: usedBits,
+      values: allValues
+    }
   }
 
-  candidates.sort((a, b) => b.uidLength - a.uidLength)
-  return { ok: true, bits: usedBits, values, candidates, decoded: candidates[0] }
-}
+  candidates.sort((a, b) => {
+    if (a.offset !== b.offset) return a.offset - b.offset
+    return b.uidLength - a.uidLength
+  })
 
+  return {
+    ok: true,
+    bits: usedBits,
+    values: allValues,
+    candidates,
+    decoded: candidates[0]
+  }
+}
 
 router.get('/', (req, res) => res.redirect('/dashboard'))
 
