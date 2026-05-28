@@ -2,6 +2,8 @@
 
 Toegevoegd voor de Huttendorp ESP32 boxen.
 
+De boxen hoeven geen `gameId` mee te sturen. De server koppelt elke aanvraag automatisch aan het spel dat in de webinterface als actief spel is geselecteerd.
+
 ## POST /api/box/check-card
 
 Request:
@@ -19,13 +21,15 @@ Response bij succes:
 ```json
 {
   "ok": true,
-  "cardId": "04AABBCC",
   "uid": "04AABBCC",
   "postId": "p01",
-  "boxId": "box-p01",
+  "gameId": "...",
   "teamId": "...",
   "teamName": "Team 1",
-  "totalPoints": 0
+  "questionTitle": "...",
+  "alreadyAnswered": false,
+  "existingAnswer": null,
+  "answeredAt": null
 }
 ```
 
@@ -49,7 +53,9 @@ Response bij succes:
 ```json
 {
   "ok": true,
-  "message": "Antwoord opgeslagen",
+  "alreadyAnswered": false,
+  "gameId": "...",
+  "gameName": "Huttendorp 2026",
   "postId": "p01",
   "uid": "04AABBCC",
   "answer": "R",
@@ -63,4 +69,4 @@ Response bij succes:
 
 ## GET /api/box/status
 
-Geeft simpele serverstatus terug voor testen.
+Geeft simpele serverstatus terug voor testen en toont ook het actieve `gameId`.

@@ -88,6 +88,10 @@ function buildBlobPathname(payload) {
 }
 
 function getAuthenticatedUser(req) {
+  if (req?.session?.isAdminLoggedIn) {
+    return { id: 'admin', email: 'admin-login' }
+  }
+
   if (req?.session?.googleUser) {
     return req.session.googleUser
   }

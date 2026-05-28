@@ -1,6 +1,21 @@
 <%- include('../partials/page-shell-start', { title: 'Game setup' }); %>
 <section class="panel">
-  <h1>Game setup</h1>
+  <div class="sectionHeader">
+    <div>
+      <h1>Game setup</h1>
+      <p>Actief spel: <strong><%= currentGame ? currentGame.name : '-' %></strong></p>
+    </div>
+  </div>
+
+  <form method="post" action="/games" class="gridForm two">
+    <label>Nieuw spel<input name="name" placeholder="Bijvoorbeeld Huttendorp 2026" required></label>
+    <label class="radioLine"><input type="checkbox" name="makeCurrent" checked> Meteen actief maken</label>
+    <button class="button" type="submit">Spel aanmaken</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Team toevoegen aan <%= currentGame ? currentGame.name : 'actief spel' %></h2>
   <form method="post" action="/teams" class="gridForm two">
     <label>Kaart ID<input name="cardId" placeholder="Scan kaart..." required></label>
     <label>Teamnaam<input name="name" placeholder="Team Rood" required></label>
@@ -10,7 +25,7 @@
   <%- include('../partials/nfc-card-scanner', { inputName: 'cardId', autoSubmit: false }); %>
 </section>
 <section class="panel">
-  <h2>Teams</h2>
+  <h2>Teams in <%= currentGame ? currentGame.name : 'actief spel' %></h2>
   <table class="dataTable">
     <thead><tr><th>Naam</th><th>Kaart</th><th>Punten</th><th></th></tr></thead>
     <tbody>

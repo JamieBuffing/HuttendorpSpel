@@ -5,24 +5,93 @@ body footer {
   border-color: var(--JaBuvo1);
   width: 90%;
   margin: 10px 5% 0 5%;
-  height: 50px;
-  align-content: center;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+body footer a,
+body footer p,
+body footer form {
+  margin: 5px;
 }
 
 body footer a,
 body footer p {
-  float: right;
-  display: inline;
-  height: 40px;
-  margin: 5px;
-  align-content: center;
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
 }
 
-body footer :nth-child(1),
-body footer :nth-child(2) {
-  float: left;
+body footer p {
+  margin-right: auto;
 }
 
 body footer a img {
-  height: inherit;
+  height: 40px;
+}
+
+.footerForm {
+  display: inline-flex;
+  align-items: center;
+}
+
+.footerLink {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.footerGameSwitcher {
+  display: inline-flex;
+  align-items: center;
+  max-width: 260px;
+}
+
+.footerGameSwitcher label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.footerGameSwitcher select {
+  width: 150px;
+  max-width: 42vw;
+  min-height: 30px;
+  padding: 3px 24px 3px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  background: var(--wit);
+  color: var(--JaBuvo2);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 700px) {
+  body footer {
+    justify-content: center;
+  }
+
+  body footer p {
+    margin-right: 5px;
+  }
+
+  .footerGameSwitcher {
+    order: 10;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .footerGameSwitcher select {
+    width: 170px;
+    max-width: 70vw;
+  }
 }

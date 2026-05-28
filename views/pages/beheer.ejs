@@ -11,6 +11,7 @@
   <div class="sectionHeader">
     <div>
       <h1><%= isEdit ? 'Vraag bewerken' : 'Vraag aanmaken' %></h1>
+      <p>Actief spel: <strong><%= currentGame ? currentGame.name : '-' %></strong></p>
     </div>
     <% if (isEdit) { %><a class="buttonGhost" href="/beheer">Nieuwe vraag</a><% } %>
   </div>
@@ -98,7 +99,7 @@
 </section>
 
 <section class="panel">
-  <h2>Overzicht vragen en post-id’s</h2>
+  <h2>Overzicht vragen en post-id’s voor <%= currentGame ? currentGame.name : 'actief spel' %></h2>
   <table class="dataTable">
     <thead><tr><th>Type</th><th>Post-id</th><th>Vraag</th><th>Punten</th><th>Verplicht</th><th>Acties</th></tr></thead>
     <tbody>
@@ -163,7 +164,7 @@
         const result = await uploader.uploadWithVercelBlob(file, {
           module: 'huttendorp',
           entityType: 'hints',
-          entityId: '<%= isEdit && q._id ? q._id : 'nieuwe-vraag' %>',
+          entityId: '<%= currentGame ? currentGame._id : 'geen-spel' %>/<%= isEdit && q._id ? q._id : 'nieuwe-vraag' %>',
           field: input.dataset.target,
           visibility: 'public',
           allowedContentTypes: file.type ? [file.type] : []

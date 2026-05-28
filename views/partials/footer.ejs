@@ -1,5 +1,19 @@
 <a href="/dashboard"><img src="/base/img/logo_small_beeldmerk_blauw.png" alt="Huttendorp"></a>
 <p>&copy; JaBuvo</p>
+
+<% if (isAdminLoggedIn && typeof games !== 'undefined' && typeof currentGame !== 'undefined' && games && currentGame) { %>
+  <form method="post" action="/games/current" class="footerGameSwitcher">
+    <input type="hidden" name="redirectTo" value="<%= typeof currentUrl !== 'undefined' ? currentUrl : '/setup' %>">
+    <label>
+      <select name="gameId" onchange="this.form.submit()">
+        <% games.forEach((game) => { %>
+          <option value="<%= game._id %>" <%= String(game._id) === String(currentGame._id) ? 'selected' : '' %>><%= game.name %></option>
+        <% }) %>
+      </select>
+    </label>
+  </form>
+<% } %>
+
 <a href="/dashboard">Dashboard</a>
 <% if (isAdminLoggedIn) { %>
   <form action="/logout" method="post" class="footerForm"><button class="footerLink" type="submit">Uitloggen</button></form>

@@ -5,7 +5,11 @@ const {
   getFirstAvailablePostId,
   recalculateTeamPoints,
   saveAnswerFromEsp,
-  objectIdOrNull
+  objectIdOrNull,
+  getCurrentGameId,
+  setCurrentGame,
+  createGame,
+  gameFilter
 } = require('../helpers')
 
 const router = express.Router()
@@ -26,17 +30,42 @@ function normalAnswersFromBody(body) {
   }))
 }
 
+router.post('/games', requireLogin, async (req, res, next) => {
+  try {
+    const game = await createGame(req.body.name)
+
+    if (game && req.body.makeCurrent === 'on') {
+      await setCurrentGame(game._id)
+    }
+
+    res.redirect('/setup')
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/games/current', requireLogin, async (req, res, next) => {
+  try {
+    await setCurrentGame(req.body.gameId)
+    res.redirect(req.body.redirectTo || '/setup')
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.post('/teams', requireLogin, async (req, res, next) => {
   try {
     const name = String(req.body.name || '').trim()
-    const cardId = String(req.body.cardId || '').trim()
+    const cardId = String(req.body.cardId || '').trim().toUpperCase()
     if (!name || !cardId) return res.redirect('/setup')
 
     const database = await db()
+    const gameId = await getCurrentGameId()
+
     await database.collection('teams').updateOne(
-      { cardId },
+      { gameId, cardId },
       {
-        $setOnInsert: { createdAt: new Date(), questionProgress: [], totalPoints: 0 },
+        $setOnInsert: { gameId, createdAt: new Date(), questionProgress: [], totalPoints: 0 },
         $set: { name, cardId, isActive: true, updatedAt: new Date() }
       },
       { upsert: true }
@@ -50,7 +79,10 @@ router.post('/teams', requireLogin, async (req, res, next) => {
 router.post('/teams/:id/delete', requireLogin, async (req, res, next) => {
   try {
     const teamId = objectIdOrNull(req.params.id)
-    if (teamId) await (await db()).collection('teams').deleteOne({ _id: teamId })
+    if (teamId) {
+      const database = await db()
+      await database.collection('teams').deleteOne(await gameFilter({ _id: teamId }))
+    }
     res.redirect('/setup')
   } catch (error) {
     next(error)
@@ -60,9 +92,11 @@ router.post('/teams/:id/delete', requireLogin, async (req, res, next) => {
 router.post('/questions', requireLogin, async (req, res, next) => {
   try {
     const database = await db()
+    const gameId = await getCurrentGameId()
     const type = req.body.type === 'final' ? 'final' : 'normal'
     const now = new Date()
     const question = {
+      gameId,
       title: String(req.body.title || '').trim(),
       type,
       points: Number(req.body.points || 0),
@@ -72,8 +106,8 @@ router.post('/questions', requireLogin, async (req, res, next) => {
     }
 
     if (type === 'normal') {
-      const postId = await getFirstAvailablePostId()
-      if (!postId) throw new Error('Er zijn geen vrije post-id’s meer beschikbaar.')
+      const postId = await getFirstAvailablePostId(null, gameId)
+      if (!postId) throw new Error('Er zijn geen vrije post-id’s meer beschikbaar voor dit spel.')
       question.postId = postId
       question.answers = normalAnswersFromBody(req.body)
     } else {
@@ -94,11 +128,13 @@ router.post('/questions/:id', requireLogin, async (req, res, next) => {
     if (!questionId) return res.redirect('/beheer')
 
     const database = await db()
-    const existing = await database.collection('questions').findOne({ _id: questionId })
+    const gameId = await getCurrentGameId()
+    const existing = await database.collection('questions').findOne({ _id: questionId, gameId })
     if (!existing) return res.redirect('/beheer')
 
     const type = req.body.type === 'final' ? 'final' : 'normal'
     const update = {
+      gameId,
       title: String(req.body.title || '').trim(),
       type,
       points: Number(req.body.points || 0),
@@ -106,8 +142,8 @@ router.post('/questions/:id', requireLogin, async (req, res, next) => {
     }
 
     if (type === 'normal') {
-      update.postId = existing.type === 'normal' && existing.postId ? existing.postId : await getFirstAvailablePostId(existing._id)
-      if (!update.postId) throw new Error('Er zijn geen vrije post-id’s meer beschikbaar.')
+      update.postId = existing.type === 'normal' && existing.postId ? existing.postId : await getFirstAvailablePostId(existing._id, gameId)
+      if (!update.postId) throw new Error('Er zijn geen vrije post-id’s meer beschikbaar voor dit spel.')
       update.answers = normalAnswersFromBody(req.body)
       update.correctAnswer = null
       update.requiredForLeaderboard = false
@@ -118,7 +154,7 @@ router.post('/questions/:id', requireLogin, async (req, res, next) => {
       update.requiredForLeaderboard = req.body.requiredForLeaderboard === 'on'
     }
 
-    await database.collection('questions').updateOne({ _id: questionId }, { $set: update })
+    await database.collection('questions').updateOne({ _id: questionId, gameId }, { $set: update })
     res.redirect('/beheer')
   } catch (error) {
     next(error)
@@ -130,9 +166,13 @@ router.post('/questions/:id/delete', requireLogin, async (req, res, next) => {
     const questionId = objectIdOrNull(req.params.id)
     if (questionId) {
       const database = await db()
-      await database.collection('questions').deleteOne({ _id: questionId })
-      await database.collection('teams').updateMany({}, { $pull: { questionProgress: { questionId } }, $set: { updatedAt: new Date() } })
-      const teams = await database.collection('teams').find({}).project({ _id: 1 }).toArray()
+      const gameId = await getCurrentGameId()
+      await database.collection('questions').deleteOne({ _id: questionId, gameId })
+      await database.collection('teams').updateMany(
+        { gameId },
+        { $pull: { questionProgress: { questionId } }, $set: { updatedAt: new Date() } }
+      )
+      const teams = await database.collection('teams').find({ gameId }).project({ _id: 1 }).toArray()
       await Promise.all(teams.map((team) => recalculateTeamPoints(team._id)))
     }
     res.redirect('/beheer')
@@ -141,24 +181,24 @@ router.post('/questions/:id/delete', requireLogin, async (req, res, next) => {
   }
 })
 
-
 router.post('/api/box/check-card', async (req, res, next) => {
   try {
     const database = await db()
+    const gameId = await getCurrentGameId()
 
-    const postId = String(req.body.postId || '').trim()
+    const postId = String(req.body.postId || '').trim().toLowerCase()
     const uid = String(req.body.uid || req.body.cardId || req.body.teamId || '').trim().toUpperCase()
 
     if (!postId) return res.status(400).json({ ok: false, error: 'postId ontbreekt' })
     if (!uid) return res.status(400).json({ ok: false, error: 'uid/cardId ontbreekt' })
 
     const [team, question] = await Promise.all([
-      database.collection('teams').findOne({ cardId: uid, isActive: { $ne: false } }),
-      database.collection('questions').findOne({ postId, type: 'normal', isActive: { $ne: false } })
+      database.collection('teams').findOne({ gameId, cardId: uid, isActive: { $ne: false } }),
+      database.collection('questions').findOne({ gameId, postId, type: 'normal', isActive: { $ne: false } })
     ])
 
-    if (!team) return res.status(404).json({ ok: false, error: 'Team niet gevonden', uid, postId })
-    if (!question) return res.status(404).json({ ok: false, error: 'Vraag/post niet gevonden', uid, postId, teamName: team.name })
+    if (!team) return res.status(404).json({ ok: false, error: 'Team niet gevonden', uid, postId, gameId: String(gameId) })
+    if (!question) return res.status(404).json({ ok: false, error: 'Vraag/post niet gevonden', uid, postId, teamName: team.name, gameId: String(gameId) })
 
     const existingProgress = (team.questionProgress || []).find((item) => {
       return item.type === 'normal' && String(item.questionId) === String(question._id)
@@ -168,6 +208,7 @@ router.post('/api/box/check-card', async (req, res, next) => {
       ok: true,
       uid,
       postId,
+      gameId: String(gameId),
       teamId: String(team._id),
       teamName: team.name,
       questionTitle: question.title,
@@ -202,7 +243,12 @@ router.post('/api/box/submit-answer', async (req, res, next) => {
 })
 
 router.get('/api/box/status', async (req, res) => {
-  res.json({ ok: true, service: 'box-api', time: new Date().toISOString() })
+  try {
+    const gameId = await getCurrentGameId()
+    res.json({ ok: true, service: 'box-api', gameId: String(gameId), time: new Date().toISOString() })
+  } catch (error) {
+    res.status(500).json({ ok: false, service: 'box-api', error: error.message || 'Status niet beschikbaar' })
+  }
 })
 
 router.post('/api/esp32/answer', async (req, res, next) => {
@@ -224,7 +270,6 @@ router.post('/api/esp32/answer', async (req, res, next) => {
     next(error)
   }
 })
-
 
 router.post('/api/nfc/scan', (req, res) => {
   const expectedToken = String(process.env.NFC_BRIDGE_TOKEN || '').trim()
@@ -255,6 +300,7 @@ router.post('/api/nfc/scan', (req, res) => {
 router.post('/api/hints/view', async (req, res, next) => {
   try {
     const database = await db()
+    const gameId = await getCurrentGameId()
 
     const teamId = objectIdOrNull(req.body.teamId)
     const questionId = objectIdOrNull(req.body.questionId)
@@ -263,13 +309,20 @@ router.post('/api/hints/view', async (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'Ongeldige ID' })
     }
 
-    const team = await database.collection('teams').findOne({ _id: teamId })
+    const [team, question] = await Promise.all([
+      database.collection('teams').findOne({ _id: teamId, gameId, isActive: { $ne: false } }),
+      database.collection('questions').findOne({ _id: questionId, gameId, isActive: { $ne: false } })
+    ])
 
     if (!team) {
       return res.status(404).json({ ok: false, error: 'Team niet gevonden' })
     }
 
-    const progress = team.questionProgress.find(
+    if (!question) {
+      return res.status(404).json({ ok: false, error: 'Vraag niet gevonden' })
+    }
+
+    const progress = (team.questionProgress || []).find(
       p => String(p.questionId) === String(questionId)
     )
 
@@ -277,7 +330,6 @@ router.post('/api/hints/view', async (req, res, next) => {
       return res.status(404).json({ ok: false, error: 'Vraag niet gevonden' })
     }
 
-    // fallback naar 3 als undefined
     const remaining = typeof progress.hintViews === 'number' ? progress.hintViews : 3
 
     if (remaining <= 0) {
@@ -288,6 +340,7 @@ router.post('/api/hints/view', async (req, res, next) => {
     await database.collection('teams').updateOne(
       {
         _id: teamId,
+        gameId,
         'questionProgress.questionId': questionId
       },
       {
@@ -311,17 +364,22 @@ router.post('/api/hints/view', async (req, res, next) => {
 router.post('/gamemaster/final', requireLogin, async (req, res, next) => {
   try {
     const database = await db()
+    const gameId = await getCurrentGameId()
     const teamId = objectIdOrNull(req.body.teamId)
     const questionId = objectIdOrNull(req.body.questionId)
     const status = req.body.status === 'correct' ? 'correct' : 'wrong'
     if (!teamId || !questionId) return res.redirect('/gamemaster')
 
-    const question = await database.collection('questions').findOne({ _id: questionId, type: 'final' })
+    const question = await database.collection('questions').findOne({ _id: questionId, gameId, type: 'final' })
     if (!question) return res.redirect('/gamemaster')
+
+    const team = await database.collection('teams').findOne({ _id: teamId, gameId })
+    if (!team) return res.redirect('/gamemaster')
 
     const isCorrect = status === 'correct'
     const progressItem = {
       questionId: question._id,
+      gameId,
       type: 'final',
       givenAnswer: question.correctAnswer,
       isCorrect,
@@ -330,9 +388,9 @@ router.post('/gamemaster/final', requireLogin, async (req, res, next) => {
       answeredAt: new Date()
     }
 
-    await database.collection('teams').updateOne({ _id: teamId }, { $pull: { questionProgress: { questionId: question._id } } })
+    await database.collection('teams').updateOne({ _id: teamId, gameId }, { $pull: { questionProgress: { questionId: question._id } } })
     await database.collection('teams').updateOne(
-      { _id: teamId },
+      { _id: teamId, gameId },
       { $push: { questionProgress: progressItem }, $set: { updatedAt: new Date() } }
     )
     await recalculateTeamPoints(teamId)

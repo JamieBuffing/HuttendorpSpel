@@ -8,11 +8,13 @@ const {
   buildLeaderboard,
   buildLeidingOverview,
   saveAnswerFromEsp,
-  objectIdOrNull
+  objectIdOrNull,
+  getGameContext,
+  getCurrentGameId,
+  gameFilter
 } = require('../helpers')
 
 const router = express.Router()
-
 
 function decodeQrBackupCode(input) {
   const code = String(input || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
@@ -49,6 +51,18 @@ router.post('/logout', (req, res) => {
   res.redirect('/dashboard')
 })
 
+router.use(async (req, res, next) => {
+  try {
+    const { currentGame, games } = await getGameContext()
+    res.locals.currentGame = currentGame
+    res.locals.games = games
+    res.locals.currentUrl = req.originalUrl
+    next()
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.get('/dashboard', async (req, res, next) => {
   try {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private')
@@ -56,17 +70,19 @@ router.get('/dashboard', async (req, res, next) => {
     res.setHeader('Expires', '0')
 
     const database = await db()
-    const cardId = String(req.query.cardId || '').trim()
+    const gameId = await getCurrentGameId()
+    const cardId = String(req.query.cardId || '').trim().toUpperCase()
     let team = null
     let progressRows = []
 
     if (cardId) {
-      team = await database.collection('teams').findOne({ cardId, isActive: { $ne: false } })
+      team = await database.collection('teams').findOne({ gameId, cardId, isActive: { $ne: false } })
       if (team) {
         const questionIds = (team.questionProgress || []).map((item) => item.questionId).filter(Boolean)
-        const questions = await database.collection('questions').find({ _id: { $in: questionIds } }).toArray()
+        const questions = await database.collection('questions').find({ gameId, _id: { $in: questionIds } }).toArray()
         const questionMap = new Map(questions.map((question) => [String(question._id), question]))
         progressRows = (team.questionProgress || [])
+          .filter((item) => questionMap.has(String(item.questionId)))
           .slice()
           .sort((a, b) => new Date(a.answeredAt || 0) - new Date(b.answeredAt || 0))
           .map((item) => ({ progress: item, question: questionMap.get(String(item.questionId)) }))
@@ -160,7 +176,7 @@ router.post('/import', requireLogin, async (req, res) => {
 router.get('/setup', requireLogin, async (req, res, next) => {
   try {
     const database = await db()
-    const teams = await database.collection('teams').find({}).sort({ createdAt: 1 }).toArray()
+    const teams = await database.collection('teams').find(await gameFilter({})).sort({ createdAt: 1 }).toArray()
     res.render('pages/setup', { teams, error: null })
   } catch (error) {
     next(error)
@@ -170,7 +186,7 @@ router.get('/setup', requireLogin, async (req, res, next) => {
 router.get('/beheer', requireLogin, async (req, res, next) => {
   try {
     const database = await db()
-    const questions = await database.collection('questions').find({ isActive: { $ne: false } }).sort({ type: 1, postId: 1, createdAt: 1 }).toArray()
+    const questions = await database.collection('questions').find(await gameFilter({ isActive: { $ne: false } })).sort({ type: 1, postId: 1, createdAt: 1 }).toArray()
     const availablePostId = await getFirstAvailablePostId()
     const usedPostIds = new Set(questions.filter((q) => q.type === 'normal').map((q) => q.postId))
     res.render('pages/beheer', { questions, availablePostId, usedPostIds, postIds: POST_IDS, editingQuestion: null, error: null })
@@ -182,10 +198,11 @@ router.get('/beheer', requireLogin, async (req, res, next) => {
 router.get('/beheer/:id/edit', requireLogin, async (req, res, next) => {
   try {
     const database = await db()
-    const editingQuestion = await database.collection('questions').findOne({ _id: new ObjectId(req.params.id) })
+    const gameId = await getCurrentGameId()
+    const editingQuestion = await database.collection('questions').findOne({ _id: new ObjectId(req.params.id), gameId })
     if (!editingQuestion) return res.redirect('/beheer')
-    const questions = await database.collection('questions').find({ isActive: { $ne: false } }).sort({ type: 1, postId: 1, createdAt: 1 }).toArray()
-    const availablePostId = editingQuestion.postId || await getFirstAvailablePostId(editingQuestion._id)
+    const questions = await database.collection('questions').find({ gameId, isActive: { $ne: false } }).sort({ type: 1, postId: 1, createdAt: 1 }).toArray()
+    const availablePostId = editingQuestion.postId || await getFirstAvailablePostId(editingQuestion._id, gameId)
     const usedPostIds = new Set(questions.filter((q) => q.type === 'normal' && String(q._id) !== String(editingQuestion._id)).map((q) => q.postId))
     res.render('pages/beheer', { questions, availablePostId, usedPostIds, postIds: POST_IDS, editingQuestion, error: null })
   } catch (error) {
@@ -196,13 +213,14 @@ router.get('/beheer/:id/edit', requireLogin, async (req, res, next) => {
 router.get('/gamemaster', requireLogin, async (req, res, next) => {
   try {
     const database = await db()
-    const cardId = String(req.query.cardId || '').trim()
-    const finalQuestions = await database.collection('questions').find({ type: 'final', isActive: { $ne: false } }).sort({ createdAt: 1 }).toArray()
+    const gameId = await getCurrentGameId()
+    const cardId = String(req.query.cardId || '').trim().toUpperCase()
+    const finalQuestions = await database.collection('questions').find({ gameId, type: 'final', isActive: { $ne: false } }).sort({ createdAt: 1 }).toArray()
     let team = null
     let rows = []
 
     if (cardId) {
-      team = await database.collection('teams').findOne({ cardId, isActive: { $ne: false } })
+      team = await database.collection('teams').findOne({ gameId, cardId, isActive: { $ne: false } })
       if (team) {
         rows = finalQuestions.map((question) => {
           const progress = (team.questionProgress || []).find((item) => String(item.questionId) === String(question._id) && item.type === 'final')
