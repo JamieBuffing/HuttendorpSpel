@@ -58,6 +58,8 @@
     <div class="resultGrid">
       <div><span>Post</span><strong id="foundPost">p01</strong></div>
       <div><span>UID</span><strong id="foundUid">042A16BAFC2091</strong></div>
+      <div><span>Team</span><strong id="foundTeam">-</strong></div>
+      <div><span>Vraag</span><strong id="foundQuestion">-</strong></div>
     </div>
   </div>
 
@@ -165,6 +167,8 @@
   const foundPost = document.getElementById('foundPost');
   const foundAnswer = document.getElementById('foundAnswer');
   const foundUid = document.getElementById('foundUid');
+  const foundTeam = document.getElementById('foundTeam');
+  const foundQuestion = document.getElementById('foundQuestion');
   const scannerPill = document.getElementById('scannerPill');
   const heroStepNumber = document.getElementById('heroStepNumber');
   const heroStepText = document.getElementById('heroStepText');
@@ -202,22 +206,43 @@
     return { code, postId: match[1].toLowerCase(), answer: match[2], uid: match[3] };
   }
 
-  function showSafeScan(decoded) {
-    safeDecoded = decoded;
+  function showSafeScan(decoded, validation = null, canSave = true) {
+    safeDecoded = canSave ? decoded : null;
     manualCodeEl.value = decoded.code;
     foundCode.textContent = decoded.code;
     foundPost.textContent = decoded.postId;
     foundAnswer.textContent = decoded.answer;
     foundUid.textContent = decoded.uid;
+    foundTeam.textContent = validation?.teamName || '-';
+    foundQuestion.textContent = validation?.questionTitle || '-';
     scanResultCard.hidden = false;
     scanBtn.hidden = true;
-    saveScanBtn.hidden = false;
+    saveScanBtn.hidden = !canSave;
+    saveScanBtn.disabled = !canSave;
     cancelScanBtn.hidden = false;
     videoWrap.hidden = true;
     cameraPlaceholder.hidden = false;
-    setStep('2', 'Controleer en sla op');
-    setPill('Klaar om op te slaan', 'ready');
-    setStatus('Veilige scan gevonden. Druk op Opslaan.', 'ok');
+
+    if (canSave) {
+      setStep('2', 'Controleer en sla op');
+      setPill('Klaar om op te slaan', 'ready');
+      setStatus(validation?.message || 'Veilige scan gevonden. Druk op Opslaan.', 'ok');
+    } else {
+      setStep('2', 'Niet opslaan');
+      setPill('Niet geldig', 'error');
+      setStatus(validation?.message || validation?.error || 'Deze code mag niet opgeslagen worden.', 'error');
+    }
+  }
+
+  async function validateScannedCode(decoded) {
+    const response = await fetch('/import/scan-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: decoded.code, testOnly: true })
+    });
+
+    const json = await response.json().catch(() => ({}));
+    return { response, json };
   }
 
   async function stopScannerOnly() {
@@ -265,7 +290,18 @@
     }
 
     await stopScannerOnly();
-    showSafeScan(decoded);
+    setStep('2', 'Controleren');
+    setPill('Controleren...', 'active');
+    setStatus('Code gevonden. Checks uitvoeren...', 'warn');
+
+    try {
+      const { response, json } = await validateScannedCode(decoded);
+      const validation = json.validation || null;
+      showSafeScan(decoded, validation, response.ok && json.ok);
+    } catch (error) {
+      showSafeScan(decoded, null, false);
+      setStatus(error.message || 'Checks uitvoeren mislukt.', 'error');
+    }
   }
 
   async function startScanner() {
@@ -301,8 +337,8 @@
         body: JSON.stringify({ code: safeDecoded.code })
       });
       const json = await response.json().catch(() => ({}));
-      if (!response.ok || !json.ok) throw new Error(json.error || 'Opslaan is mislukt.');
-      await resetForNextScan(json.alreadyAnswered ? `Al bekend: ${safeDecoded.code}` : `Opgeslagen: ${safeDecoded.code}`);
+      if (!response.ok || !json.ok) throw new Error(json.error || json.validation?.message || 'Opslaan is mislukt.');
+      await resetForNextScan(`Opgeslagen: ${safeDecoded.code}`);
     } catch (error) {
       saving = false;
       saveScanBtn.disabled = false;

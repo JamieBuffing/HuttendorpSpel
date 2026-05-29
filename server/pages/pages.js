@@ -19,14 +19,101 @@ const router = express.Router()
 function decodeQrBackupCode(input) {
   const code = String(input || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
   const match = code.match(/^(P\d{2})([RGB])([0-9A-F]{4,32})$/)
+
   if (!match) {
     throw new Error('Ongeldige QR-code. Verwacht formaat zoals P01R042A16BAFC2091.')
   }
+
+  const postId = match[1].toLowerCase()
+
+  if (!POST_IDS.includes(postId)) {
+    throw new Error(`Ongeldige post: ${postId}. Deze post bestaat niet in de vaste postlijst.`)
+  }
+
   return {
     code,
-    postId: match[1].toLowerCase(),
+    postId,
     answer: match[2],
     uid: match[3]
+  }
+}
+
+function importStatusFromValidation(validation) {
+  if (validation.ok) return 200
+  if (validation.alreadyAnswered) return 409
+  if (validation.error === 'Team niet gevonden' || validation.error === 'Vraag/post niet gevonden') return 404
+  return 400
+}
+
+async function validateQrBackupImport(decoded) {
+  const database = await db()
+  const gameId = await getCurrentGameId()
+
+  const [team, question] = await Promise.all([
+    database.collection('teams').findOne({ gameId, cardId: decoded.uid, isActive: { $ne: false } }),
+    database.collection('questions').findOne({ gameId, postId: decoded.postId, type: 'normal', isActive: { $ne: false } })
+  ])
+
+  if (!team) {
+    return {
+      ok: false,
+      error: 'Team niet gevonden',
+      message: `Geen actief team gevonden met kaart/UID ${decoded.uid}.`,
+      decoded,
+      gameId: String(gameId)
+    }
+  }
+
+  if (!question) {
+    return {
+      ok: false,
+      error: 'Vraag/post niet gevonden',
+      message: `Post ${decoded.postId} bestaat niet of is niet actief in dit spel.`,
+      decoded,
+      gameId: String(gameId),
+      teamName: team.name
+    }
+  }
+
+  const answerExists = (question.answers || []).some((item) => item.key === decoded.answer)
+  if (!answerExists) {
+    return {
+      ok: false,
+      error: 'Ongeldig antwoord',
+      message: `Antwoord ${decoded.answer} bestaat niet bij post ${decoded.postId}.`,
+      decoded,
+      gameId: String(gameId),
+      teamName: team.name,
+      questionTitle: question.title
+    }
+  }
+
+  const existingProgress = (team.questionProgress || []).find((item) => {
+    return item.type === 'normal' && String(item.questionId) === String(question._id)
+  })
+
+  if (existingProgress) {
+    return {
+      ok: false,
+      alreadyAnswered: true,
+      error: 'Vraag al beantwoord',
+      message: `${team.name} heeft post ${decoded.postId} al beantwoord.`,
+      decoded,
+      gameId: String(gameId),
+      teamName: team.name,
+      questionTitle: question.title,
+      existingAnswer: existingProgress.selectedAnswer || null,
+      answeredAt: existingProgress.answeredAt || null
+    }
+  }
+
+  return {
+    ok: true,
+    message: 'Code is geldig en kan worden opgeslagen.',
+    decoded,
+    gameId: String(gameId),
+    teamName: team.name,
+    questionTitle: question.title
   }
 }
 
@@ -123,9 +210,26 @@ router.get('/import', requireLogin, (req, res) => {
 router.post('/import/scan-code', requireLogin, async (req, res) => {
   try {
     const decoded = decodeQrBackupCode(req.body.code)
+    const validation = await validateQrBackupImport(decoded)
 
     if (req.body.testOnly === true || req.body.testOnly === 'true') {
-      return res.json({ ok: true, testOnly: true, decoded })
+      return res.status(importStatusFromValidation(validation)).json({
+        ok: Boolean(validation.ok),
+        testOnly: true,
+        decoded,
+        validation,
+        error: validation.ok ? null : validation.message || validation.error
+      })
+    }
+
+    if (!validation.ok) {
+      return res.status(importStatusFromValidation(validation)).json({
+        ok: false,
+        decoded,
+        validation,
+        alreadyAnswered: Boolean(validation.alreadyAnswered),
+        error: validation.message || validation.error || 'QR-code is niet geldig voor dit spel.'
+      })
     }
 
     const result = await saveAnswerFromEsp({
@@ -136,11 +240,23 @@ router.post('/import/scan-code', requireLogin, async (req, res) => {
       allowOverwrite: false
     })
 
-    res.status(result.ok || result.alreadyAnswered ? 200 : 400).json({
-      ok: Boolean(result.ok || result.alreadyAnswered),
+    if (!result.ok) {
+      const status = result.alreadyAnswered ? 409 : (['Team niet gevonden', 'Vraag/post niet gevonden'].includes(result.error) ? 404 : 400)
+      return res.status(status).json({
+        ok: false,
+        decoded,
+        result,
+        alreadyAnswered: Boolean(result.alreadyAnswered),
+        error: result.error || 'Opslaan is mislukt.'
+      })
+    }
+
+    res.json({
+      ok: true,
       decoded,
+      validation,
       result,
-      alreadyAnswered: Boolean(result.alreadyAnswered)
+      alreadyAnswered: false
     })
   } catch (error) {
     res.status(400).json({
@@ -153,6 +269,15 @@ router.post('/import/scan-code', requireLogin, async (req, res) => {
 router.post('/import', requireLogin, async (req, res) => {
   try {
     const decoded = decodeQrBackupCode(req.body.code)
+    const validation = await validateQrBackupImport(decoded)
+
+    if (!validation.ok) {
+      return res.status(importStatusFromValidation(validation)).render('pages/import', {
+        result: null,
+        error: validation.message || validation.error || 'QR-code is niet geldig voor dit spel.'
+      })
+    }
+
     const result = await saveAnswerFromEsp({
       postId: decoded.postId,
       teamId: decoded.uid,
@@ -161,8 +286,15 @@ router.post('/import', requireLogin, async (req, res) => {
       allowOverwrite: false
     })
 
+    if (!result.ok) {
+      return res.status(result.alreadyAnswered ? 409 : 400).render('pages/import', {
+        result: null,
+        error: result.error || 'Opslaan is mislukt.'
+      })
+    }
+
     res.render('pages/import', {
-      result: { decoded, result },
+      result: { decoded, validation, result },
       error: null
     })
   } catch (error) {
