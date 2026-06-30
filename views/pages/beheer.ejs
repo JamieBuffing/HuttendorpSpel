@@ -174,7 +174,11 @@
           entityId: '<%= currentGame ? currentGame._id : 'geen-spel' %>/<%= isEdit && q._id ? q._id : 'nieuwe-vraag' %>',
           field: input.dataset.target,
           visibility: 'public',
-          allowedContentTypes: file.type ? [file.type] : []
+          allowedContentTypes: file.type ? [file.type] : [],
+          onUploadProgress: (event) => {
+            if (!event || !event.percentage) return;
+            status.textContent = `Uploaden naar Vercel Blob... ${Math.round(event.percentage)}%`;
+          }
         });
 
         target.value = result.url;
