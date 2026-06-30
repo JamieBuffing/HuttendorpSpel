@@ -144,6 +144,7 @@ async function handleClientUploadRequest(req) {
       }
 
       const options = {
+        access: payload.visibility,
         addRandomSuffix: false,
         tokenPayload: JSON.stringify({
           module: payload.module,
