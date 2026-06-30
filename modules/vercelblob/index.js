@@ -2,7 +2,8 @@ const express = require('express')
 const path = require('path')
 const {
   pingBlob,
-  handleClientUploadRequest
+  handleClientUploadRequest,
+  handleServerUploadRequest
 } = require('./server/client')
 
 const router = express.Router()
@@ -57,6 +58,18 @@ router.post('/client-upload', async (req, res) => {
     console.error('Vercel Blob client upload fout:', error)
     return res.status(400).json({
       error: error.message || 'Client upload mislukt'
+    })
+  }
+})
+
+router.post('/server-upload', express.raw({ type: '*/*', limit: '100mb' }), async (req, res) => {
+  try {
+    const jsonResponse = await handleServerUploadRequest(req)
+    return res.status(200).json(jsonResponse)
+  } catch (error) {
+    console.error('Vercel Blob server upload fout:', error)
+    return res.status(400).json({
+      error: error.message || 'Server upload mislukt'
     })
   }
 })

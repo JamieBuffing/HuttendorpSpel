@@ -1,4 +1,4 @@
-const { list } = require('@vercel/blob')
+const { list, put } = require('@vercel/blob')
 
 const token = process.env.BLOB_READ_WRITE_TOKEN
 
@@ -170,8 +170,58 @@ async function handleClientUploadRequest(req) {
   })
 }
 
+async function handleServerUploadRequest(req) {
+  const authenticatedUser = getAuthenticatedUser(req)
+
+  if (REQUIRE_LOGIN && !authenticatedUser) {
+    console.error('Blob server upload auth ontbreekt', {
+      hasSession: Boolean(req.session),
+      hasSessionUser: Boolean(req?.session?.user),
+      hasReqUser: Boolean(req?.user),
+      hasPassportUser: Boolean(req?.session?.passport?.user),
+      hasGoogleUser: Boolean(req?.session?.googleUser),
+      hasAdminLogin: Boolean(req?.session?.isAdminLoggedIn),
+      sessionKeys: req?.session ? Object.keys(req.session) : []
+    })
+
+    throw new Error('Login vereist voor upload')
+  }
+
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    throw new Error('Uploadbestand ontbreekt')
+  }
+
+  const encodedPayload = String(req.headers['x-blob-client-payload'] || '')
+  if (!encodedPayload) {
+    throw new Error('Upload metadata ontbreekt')
+  }
+
+  let clientPayload
+  try {
+    clientPayload = decodeURIComponent(encodedPayload)
+  } catch {
+    throw new Error('Upload metadata is ongeldig gecodeerd')
+  }
+
+  const payload = parseClientPayload(clientPayload)
+  const pathname = buildBlobPathname(payload)
+  const contentType = String(req.headers['content-type'] || '').split(';')[0].trim()
+
+  if (payload.allowedContentTypes.length > 0 && !payload.allowedContentTypes.includes(contentType)) {
+    throw new Error('Bestandstype is niet toegestaan')
+  }
+
+  return put(pathname, req.body, {
+    access: payload.visibility,
+    token,
+    contentType: contentType || undefined,
+    addRandomSuffix: false
+  })
+}
+
 module.exports = {
   pingBlob,
   handleClientUploadRequest,
+  handleServerUploadRequest,
   buildBlobPathname
 }
