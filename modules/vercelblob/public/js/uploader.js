@@ -1,4 +1,4 @@
-import { upload } from 'https://esm.sh/@vercel/blob/client'
+let vercelBlobClientPromise
 
 function sanitizeSegment(value) {
   return String(value || '')
@@ -35,6 +35,25 @@ function buildBlobPathname(payload) {
   ].join('/')
 }
 
+async function loadVercelBlobClient() {
+  if (!vercelBlobClientPromise) {
+    vercelBlobClientPromise = import('https://esm.sh/@vercel/blob/client')
+      .then((module) => {
+        if (typeof module.upload !== 'function') {
+          throw new Error('Vercel Blob upload client is niet beschikbaar')
+        }
+
+        return module
+      })
+      .catch((error) => {
+        vercelBlobClientPromise = null
+        throw new Error(`Vercel Blob upload client kon niet laden: ${error.message || error}`)
+      })
+  }
+
+  return vercelBlobClientPromise
+}
+
 async function uploadWithVercelBlob(file, options = {}) {
   if (!file) {
     throw new Error('Geen bestand gekozen')
@@ -54,6 +73,7 @@ async function uploadWithVercelBlob(file, options = {}) {
   }
 
   const pathname = buildBlobPathname(payload)
+  const { upload } = await loadVercelBlobClient()
 
   return upload(pathname, file, {
     access: payload.visibility,
