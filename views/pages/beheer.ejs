@@ -119,32 +119,16 @@
     </tbody>
   </table>
 </section>
-<script type="module" src="/vercelblob/static/js/uploader.js"></script>
+<script src="/vercelblob/static/js/uploader.js"></script>
 <script>
   const typeSelect = document.getElementById('questionType');
-  let blobUploaderModulePromise = null;
 
-  async function getBlobUploader() {
+  function getBlobUploader() {
     if (window.JaBuvoBlobUploader) {
       return window.JaBuvoBlobUploader;
     }
 
-    if (!blobUploaderModulePromise) {
-      blobUploaderModulePromise = import('/vercelblob/static/js/uploader.js')
-        .then(() => {
-          if (!window.JaBuvoBlobUploader) {
-            throw new Error('Vercel Blob uploader is niet beschikbaar na laden.');
-          }
-
-          return window.JaBuvoBlobUploader;
-        })
-        .catch((error) => {
-          blobUploaderModulePromise = null;
-          throw new Error(`Vercel Blob uploader kon niet laden: ${error.message || error}`);
-        });
-    }
-
-    return blobUploaderModulePromise;
+    throw new Error('Vercel Blob uploader is niet geladen. Controleer /vercelblob/static/js/uploader.js.');
   }
 
   function updateQuestionTypeFields() {
@@ -182,7 +166,7 @@
       status.textContent = 'Uploaden naar Vercel Blob...';
 
       try {
-        const uploader = await getBlobUploader();
+        const uploader = getBlobUploader();
 
         const result = await uploader.uploadWithVercelBlob(file, {
           module: 'huttendorp',

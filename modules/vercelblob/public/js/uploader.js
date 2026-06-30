@@ -1,96 +1,77 @@
-let vercelBlobClientPromise
-
-function sanitizeSegment(value) {
-  return String(value || '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-zA-Z0-9._-]/g, '')
-    .slice(0, 120)
-}
-
-function sanitizeFilename(value) {
-  const cleaned = String(value || '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-zA-Z0-9._-]/g, '')
-
-  return cleaned || 'bestand'
-}
-
-function createUploadKey() {
-  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
-    return globalThis.crypto.randomUUID()
+(function () {
+  function sanitizeSegment(value) {
+    return String(value || '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-zA-Z0-9._-]/g, '')
+      .slice(0, 120)
   }
 
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-}
+  function sanitizeFilename(value) {
+    const cleaned = String(value || '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-zA-Z0-9._-]/g, '')
 
-function buildBlobPathname(payload) {
-  return [
-    payload.module,
-    payload.entityType,
-    payload.entityId,
-    payload.field,
-    `${payload.uploadKey}-${payload.originalFilename}`
-  ].join('/')
-}
-
-async function loadVercelBlobClient() {
-  if (!vercelBlobClientPromise) {
-    vercelBlobClientPromise = import('https://esm.sh/@vercel/blob/client')
-      .then((module) => {
-        if (typeof module.upload !== 'function') {
-          throw new Error('Vercel Blob upload client is niet beschikbaar')
-        }
-
-        return module
-      })
-      .catch((error) => {
-        vercelBlobClientPromise = null
-        throw new Error(`Vercel Blob upload client kon niet laden: ${error.message || error}`)
-      })
+    return cleaned || 'bestand'
   }
 
-  return vercelBlobClientPromise
-}
+  function createUploadKey() {
+    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+      return globalThis.crypto.randomUUID()
+    }
 
-async function uploadWithVercelBlob(file, options = {}) {
-  if (!file) {
-    throw new Error('Geen bestand gekozen')
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   }
 
-  const payload = {
-    module: sanitizeSegment(options.module || 'uploads'),
-    entityType: sanitizeSegment(options.entityType || 'files'),
-    entityId: sanitizeSegment(options.entityId || 'general'),
-    field: sanitizeSegment(options.field || 'file'),
-    visibility: options.visibility === 'private' ? 'private' : 'public',
-    originalFilename: sanitizeFilename(file.name),
-    uploadKey: createUploadKey(),
-    allowedContentTypes: Array.isArray(options.allowedContentTypes)
-      ? options.allowedContentTypes.filter(Boolean)
-      : []
+  function buildBlobPathname(payload) {
+    return [
+      payload.module,
+      payload.entityType,
+      payload.entityId,
+      payload.field,
+      `${payload.uploadKey}-${payload.originalFilename}`
+    ].join('/')
   }
 
-  const pathname = buildBlobPathname(payload)
-  const { upload } = await loadVercelBlobClient()
+  async function uploadWithVercelBlob(file, options = {}) {
+    if (!file) {
+      throw new Error('Geen bestand gekozen')
+    }
 
-  return upload(pathname, file, {
-    access: payload.visibility,
-    handleUploadUrl: options.handleUploadUrl || '/vercelblob/client-upload',
-    clientPayload: JSON.stringify(payload),
-    onUploadProgress: typeof options.onUploadProgress === 'function'
-      ? options.onUploadProgress
-      : undefined
-  })
-}
+    const payload = {
+      module: sanitizeSegment(options.module || 'uploads'),
+      entityType: sanitizeSegment(options.entityType || 'files'),
+      entityId: sanitizeSegment(options.entityId || 'general'),
+      field: sanitizeSegment(options.field || 'file'),
+      visibility: options.visibility === 'private' ? 'private' : 'public',
+      originalFilename: sanitizeFilename(file.name),
+      uploadKey: createUploadKey(),
+      allowedContentTypes: Array.isArray(options.allowedContentTypes)
+        ? options.allowedContentTypes.filter(Boolean)
+        : []
+    }
 
-globalThis.JaBuvoBlobUploader = {
-  uploadWithVercelBlob,
-  buildBlobPathname
-}
+    const response = await fetch(options.handleUploadUrl || '/vercelblob/server-upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Blob-Client-Payload': encodeURIComponent(JSON.stringify(payload))
+      },
+      body: file
+    })
 
-export {
-  uploadWithVercelBlob,
-  buildBlobPathname
-}
+    const result = await response.json().catch(() => null)
+
+    if (!response.ok) {
+      throw new Error(result?.error || 'Upload naar Vercel Blob mislukt')
+    }
+
+    return result
+  }
+
+  globalThis.JaBuvoBlobUploader = {
+    uploadWithVercelBlob,
+    buildBlobPathname
+  }
+})()
